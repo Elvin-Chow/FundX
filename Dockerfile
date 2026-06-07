@@ -7,7 +7,7 @@ RUN npm ci
 
 COPY . .
 RUN npm run build
-RUN node scripts/db.mjs init && node scripts/db.mjs migrate
+RUN mkdir -p data && cp seed/fundx-public-db.json data/fundx.db.json
 
 FROM python:3.11-slim AS runtime
 
