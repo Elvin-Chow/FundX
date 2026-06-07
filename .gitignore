@@ -1,0 +1,69 @@
+# Dependencies and build output
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Python local state
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Environment files and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.crt
+*.cer
+
+# FundX runtime data
+.fundx/
+.fundx-runtime/
+data/
+backups/
+logs/
+*.db
+*.sqlite
+*.sqlite3
+
+# Local browser automation and test artifacts
+.playwright-cli/
+playwright-report/
+test-results/
+
+# Internal engineering files excluded from the public repository
+AGENTS*.md
+.agents/
+.codex/
+scripts/test-*.mjs
+scripts/test_*.py
+scripts/smoke.mjs
+scripts/lib/smoke-harness.mjs
+scripts/lib/load-ts-module.mjs
+scripts/env-check.mjs
+scripts/job-runner.mjs
+scripts/ops-health.mjs
+scripts/backfill_*.py
+docs/operations.md
+
+# OS and editor noise
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Package-manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

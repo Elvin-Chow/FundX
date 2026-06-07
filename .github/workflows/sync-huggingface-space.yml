@@ -1,0 +1,60 @@
+name: Sync Hugging Face Space
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: huggingface-space-sync
+  cancel-in-progress: true
+
+env:
+  HF_SPACE_REPO: Userzzjjjj/FundX
+  HF_SPACE_URL: https://huggingface.co/spaces/Userzzjjjj/FundX
+
+jobs:
+  sync:
+    name: Push clean snapshot to Hugging Face
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitHub repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Sync current tree to Hugging Face Space
+        shell: bash
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${HF_TOKEN:-}" ]; then
+            echo "::error::Missing Hugging Face deployment credential."
+            exit 1
+          fi
+
+          deploy_dir="${RUNNER_TEMP}/fundx-huggingface-space"
+          rm -rf "${deploy_dir}"
+          mkdir -p "${deploy_dir}"
+
+          git archive --format=tar HEAD | tar -x -C "${deploy_dir}"
+
+          cd "${deploy_dir}"
+          git init
+          git checkout -b main
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Sync FundX from GitHub ${GITHUB_SHA}"
+
+          git remote add hf "https://Userzzjjjj:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE_REPO}"
+          git push --force hf main
+
+          echo "Synced clean snapshot to ${HF_SPACE_URL}"
