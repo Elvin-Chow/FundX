@@ -9,7 +9,6 @@ import { DiscoverPage } from "@/features/funds";
 import { FundDetailPage } from "@/features/funds/fund-detail-page";
 import { HomePage } from "@/features/home";
 import { InsightsPage, InsightsResultPage } from "@/features/insights";
-import { MarketSelectPage } from "@/features/market";
 import { PortfolioDcaPlanPage, PortfolioPage, PortfolioResultPage } from "@/features/portfolio";
 import { ReportsPage } from "@/features/reports";
 import { SettingsPage } from "@/features/settings";
@@ -30,11 +29,6 @@ function RoutedAppPage({ children }: RoutedProps) {
   const language = parseLanguage(searchParams.get("lang"));
 
   return <AppShell>{children({ marketId, language, searchParams })}</AppShell>;
-}
-
-function MarketRoute() {
-  const [searchParams] = useSearchParams();
-  return <MarketSelectPage language={parseLanguage(searchParams.get("lang"))} />;
 }
 
 function AssetRoute() {
@@ -91,7 +85,7 @@ function DefaultHomeRedirect() {
 export default function App() {
   return (
     <Routes>
-      <Route path="/" element={<MarketRoute />} />
+      <Route path="/" element={<DefaultHomeRedirect />} />
       <Route
         path="/home"
         element={<RoutedAppPage>{({ marketId, language }) => <HomePage marketId={marketId} language={language} />}</RoutedAppPage>}
