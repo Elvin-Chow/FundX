@@ -47,6 +47,23 @@ jobs:
           git archive --format=tar HEAD | tar -x -C "${deploy_dir}"
 
           cd "${deploy_dir}"
+          readme_for_space="$(mktemp)"
+          cat > "${readme_for_space}" <<'EOF'
+          ---
+          title: FundX
+          emoji: 📈
+          colorFrom: green
+          colorTo: blue
+          sdk: docker
+          app_port: 7860
+          pinned: false
+          license: mit
+          ---
+
+          EOF
+          cat README.md >> "${readme_for_space}"
+          mv "${readme_for_space}" README.md
+
           git init
           git checkout -b main
           git config user.name "github-actions[bot]"
