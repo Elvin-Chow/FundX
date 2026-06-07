@@ -17,6 +17,7 @@ from .services import (
     read_db,
     record_audit,
     round_number,
+    get_cached_value,
     set_cached_value,
     update_db,
 )
@@ -32,6 +33,7 @@ from .market_screeners import (
 MARKET_LATEST_CACHE_TTL_SECONDS = 60 * 60 * 36
 MARKET_LATEST_RECENT_IN_FLIGHT_SECONDS = 60 * 20
 MARKET_LATEST_DAILY_SOURCE = "market-latest-sync"
+ASSET_REFRESH_CACHE_TTL_SECONDS = 600
 US_EASTERN = ZoneInfo("America/New_York")
 
 def refresh_market_top_assets(
@@ -378,12 +380,16 @@ def refresh_market_data(
     ]
     found_ids = {str(asset.get("id")) for asset in visible_requested_assets if asset.get("id")}
     fetched: list[dict[str, Any]] = []
+    cached: list[dict[str, str]] = []
     failed: list[dict[str, str]] = [*skipped, *[{"assetId": asset_id, "reason": "Asset was not found in the selected market."} for asset_id in asset_ids if asset_id not in found_ids]]
     provider_manager = MarketDataProviderManager(user_id=user_id)
     source = provider_manager.source_label(market_id)
 
     for asset in candidates:
         asset_id = str(asset.get("id"))
+        if asset_refresh_cache_hit(db, market_id, asset_id, range_value, start_date, end_date):
+            cached.append({"assetId": asset_id, "reason": "Recent asset refresh cache hit."})
+            continue
         try:
             quote = provider_manager.fetch_quote(asset, range_value=range_value, interval=interval, timeout_seconds=timeout_seconds, start_date=start_date, end_date=end_date)
             if quote:
@@ -401,7 +407,7 @@ def refresh_market_data(
         set_cached_value(
             next_db,
             f"market-sync:{market_id}",
-            {"fetched": len(fetched), "failed": failed, "at": now_iso(), "source": source, "range": range_value, "startDate": start_date, "endDate": end_date},
+            {"fetched": len(fetched), "cached": cached, "failed": failed, "at": now_iso(), "source": source, "range": range_value, "startDate": start_date, "endDate": end_date},
             600,
         )
         for quote in fetched:
@@ -411,17 +417,32 @@ def refresh_market_data(
                 {"fetched": True, "at": quote["fetchedAt"], "source": quote["source"]},
                 600,
             )
+            set_cached_value(
+                next_db,
+                asset_refresh_cache_key(quote["marketId"], quote["assetId"], range_value, start_date, end_date),
+                {"fetched": True, "at": quote["fetchedAt"], "source": quote["source"], "range": range_value, "startDate": start_date, "endDate": end_date},
+                ASSET_REFRESH_CACHE_TTL_SECONDS,
+            )
         record_audit(
             next_db,
             market_id,
             "data-source.sync",
             "market-data",
             user_id=user_id,
-            metadata={"fetched": len(fetched), "failed": len(failed), "source": source, "range": range_value, "startDate": start_date, "endDate": end_date},
+            metadata={"fetched": len(fetched), "cached": len(cached), "failed": len(failed), "source": source, "range": range_value, "startDate": start_date, "endDate": end_date},
         )
 
     update_db(mutate)
-    return {"fetched": len(fetched), "failed": failed, "source": source, "range": range_value, "startDate": start_date, "endDate": end_date}
+    return {"fetched": len(fetched), "cached": cached, "failed": failed, "source": source, "range": range_value, "startDate": start_date, "endDate": end_date}
+
+
+def asset_refresh_cache_hit(db: dict[str, Any], market_id: MarketId, asset_id: str, range_value: Range, start_date: str | None, end_date: str | None) -> bool:
+    value = get_cached_value(db, asset_refresh_cache_key(market_id, asset_id, range_value, start_date, end_date))
+    return isinstance(value, dict) and value.get("fetched") is True
+
+
+def asset_refresh_cache_key(market_id: MarketId, asset_id: str, range_value: Range, start_date: str | None, end_date: str | None) -> str:
+    return f"asset-refresh:{market_id}:{asset_id}:{range_value}:{start_date or '-'}:{end_date or '-'}"
 
 
 def fetch_public_quote(

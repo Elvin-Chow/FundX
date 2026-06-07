@@ -61,7 +61,7 @@ export function AssetDetailPage({
   const location = useLocation();
   const navigate = useNavigate();
   const [status, setStatus] = useState("");
-  const [chartRange, setChartRange] = useState<ChartRange>("ALL");
+  const [chartRange, setChartRange] = useState<ChartRange>("1Y");
   const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("daily");
   const autoRefreshAttempts = useRef<Set<string>>(new Set());
   const marketColorStyle = useMarketStore((state) => state.marketColorStyle);

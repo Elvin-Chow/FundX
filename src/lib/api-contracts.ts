@@ -110,6 +110,15 @@ export type AssetDetailResponse = {
     createdAt?: string;
     expiresAt?: string;
   };
+  refreshResult?: {
+    fetched: number;
+    cached?: Array<{ assetId?: string; reason: string }>;
+    failed: Array<{ assetId?: string; reason: string }>;
+    source: string;
+    range?: string;
+    startDate?: string | null;
+    endDate?: string | null;
+  };
 };
 
 export type MarketTopResponse = {
@@ -126,6 +135,7 @@ export type MarketTopResponse = {
   ranking?: "turnover";
   refreshResult?: {
     fetched: number;
+    cached?: Array<{ assetId?: string; source?: string; reason: string }>;
     failed: Array<{ assetId?: string; source?: string; reason: string }>;
     source: string;
     range?: string;
@@ -186,6 +196,7 @@ export type WatchlistResponse = {
   view: WatchlistViewItem[];
   refreshResult?: {
     fetched: number;
+    cached?: Array<{ assetId?: string; reason: string }>;
     failed: Array<{ assetId?: string; reason: string }>;
     source: string;
     skipped?: string;
@@ -357,6 +368,7 @@ export type CalculationResponse<T = unknown> = {
   dataAsOf?: string;
   refreshResult: {
     fetched: number;
+    cached?: Array<{ assetId?: string; reason: string }>;
     failed: Array<{ assetId?: string; reason: string }>;
     source: string;
     skipped?: string;
