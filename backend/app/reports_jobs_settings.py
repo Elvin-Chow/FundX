@@ -543,4 +543,4 @@ def require_choice(value: Any, field: str, choices: set[str]) -> str:
 
 
 def csv(value: str) -> str:
-    return f"\"{value.replace('\"', '\"\"')}\""
+    return '"' + value.replace('"', '""') + '"'
