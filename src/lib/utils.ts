@@ -87,6 +87,14 @@ export function isoDate(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+export function todayDate(date = new Date()): string {
+  return isoDate(date);
+}
+
+export function defaultStartDate(endDate = new Date()): string {
+  return isoDate(addMonths(endDate, -12));
+}
+
 export function sortHistory(history: TimePoint[]): TimePoint[] {
   return [...history].sort((a, b) => a.date.localeCompare(b.date));
 }

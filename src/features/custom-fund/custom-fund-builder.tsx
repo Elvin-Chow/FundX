@@ -14,6 +14,7 @@ import { formatCurrency, formatNumber, formatOptionalCurrency, formatOptionalPer
 import { t, type Language } from "@/lib/i18n";
 import { createReturnToState, locationToReturnTo } from "@/lib/navigation-state";
 import type { AssetRecord, CustomFundRecord, CustomFundUniverseItem, MarketId, PortfolioDcaPlan, SearchSortKey } from "@/lib/types";
+import { defaultStartDate, todayDate } from "@/lib/utils";
 import {
   CalculateButton,
   CalculationStatus,
@@ -68,14 +69,7 @@ export function CustomFundBuilder({ marketId, language: languageProp = "en" }: {
   const [status, setStatus] = useState(t(language, "custom.status.synced"));
   const [savingDraft, setSavingDraft] = useState(false);
   const [deletingFund, setDeletingFund] = useState(false);
-  const [draft, setDraft] = useState<CustomFundDraft>({
-    name: defaultName,
-    style: defaultStyle,
-    capital: "100000",
-    cashBalance: "0",
-    startDate: "",
-    endDate: new Date().toISOString().slice(0, 10),
-  });
+  const [draft, setDraft] = useState<CustomFundDraft>(() => defaultDraft(defaultName, defaultStyle));
 
   useEffect(() => {
     const cached = readCustomFundDraftCache(marketId);
@@ -85,7 +79,7 @@ export function CustomFundBuilder({ marketId, language: languageProp = "en" }: {
       setSelectedAssetMap(Object.fromEntries(cached.selectedAssets.map((asset) => [asset.id, asset])));
       setWeights(cached.weights);
       setDcaPlans(ensureDcaPlansForAssets(cached.dcaPlans, cached.selectedAssets, numericDraftValue(cached.draft.capital) || DEFAULT_CAPITAL, cached.weights));
-      setDraft(cached.draft);
+      setDraft(normalizeCustomFundDraft(cached.draft, defaultName, defaultStyle));
       setStatus(t(language, "custom.dcaDraftRestored"));
     } else {
       setEditingId(null);
@@ -293,8 +287,8 @@ export function CustomFundBuilder({ marketId, language: languageProp = "en" }: {
       style: fund.style,
       capital: Number.isFinite(restoredCapital) && restoredCapital > 0 ? String(restoredCapital) : (current.capital || "100000"),
       cashBalance: String(fund.cashBalance ?? 0),
-      startDate: fund.startDate ?? "",
-      endDate: fund.endDate ?? new Date().toISOString().slice(0, 10),
+      startDate: fund.startDate || defaultStartDate(),
+      endDate: fund.endDate || todayDate(),
     }));
     setSelectedIds(fund.holdings.map((holding) => holding.stockId));
     setSelectedAssetMap(restoredAssets);
@@ -681,8 +675,20 @@ function defaultDraft(name: string, style: string): CustomFundDraft {
     style,
     capital: "100000",
     cashBalance: "0",
-    startDate: "",
-    endDate: new Date().toISOString().slice(0, 10),
+    startDate: defaultStartDate(),
+    endDate: todayDate(),
+  };
+}
+
+function normalizeCustomFundDraft(draft: CustomFundDraft, defaultName: string, defaultStyle: string): CustomFundDraft {
+  return {
+    ...draft,
+    name: draft.name || defaultName,
+    style: draft.style || defaultStyle,
+    capital: draft.capital || "100000",
+    cashBalance: draft.cashBalance || "0",
+    startDate: draft.startDate || defaultStartDate(),
+    endDate: draft.endDate || todayDate(),
   };
 }
 

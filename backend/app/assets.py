@@ -110,7 +110,8 @@ def asset_detail_payload(
     refresh_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     asset = resolve_any_asset(db, user_id, market_id, asset_id, asset_type)
-    history = list_asset_history(db, user_id, market_id, asset_id, asset.get("assetType"))
+    resolved_asset_id = str(asset.get("id") or asset_id)
+    history = list_asset_history(db, user_id, market_id, resolved_asset_id, asset.get("assetType"))
     detail = build_asset_detail(db, user_id, market_id, asset)
     payload = {
         **get_market_data_meta(
@@ -173,7 +174,7 @@ def resolve_any_asset(
     if asset:
         return asset
 
-    symbol_slug = market_top_symbol_slug(asset_id, market_id)
+    symbol_slug = symbol_slug_from_route_id(asset_id, market_id)
     if symbol_slug:
         asset = next(
             (
@@ -205,6 +206,10 @@ def resolve_any_asset(
     raise FundXApiError("not_found", "Asset was not found in the selected market.", 404)
 
 
+def symbol_slug_from_route_id(asset_id: str, market_id: str) -> str | None:
+    return market_top_symbol_slug(asset_id, market_id) or market_symbol_slug(asset_id, market_id)
+
+
 def market_top_symbol_slug(asset_id: str, market_id: str) -> str | None:
     prefix = f"market-top-{market_id}-"
     if not asset_id.startswith(prefix):
@@ -213,6 +218,13 @@ def market_top_symbol_slug(asset_id: str, market_id: str) -> str | None:
     if len(parts) != 2:
         return None
     return parts[1].strip().lower() or None
+
+
+def market_symbol_slug(asset_id: str, market_id: str) -> str | None:
+    prefix = f"{market_id}-"
+    if not asset_id.startswith(prefix):
+        return None
+    return asset_id[len(prefix):].strip().lower() or None
 
 
 def symbol_slug_for_asset(symbol: Any) -> str:

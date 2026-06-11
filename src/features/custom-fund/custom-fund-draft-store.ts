@@ -1,5 +1,6 @@
 import type { Language } from "@/lib/i18n";
 import type { AssetRecord, MarketId, PortfolioDcaPlan } from "@/lib/types";
+import { defaultStartDate, todayDate } from "@/lib/utils";
 
 export type CustomFundDraftCache = {
   marketId: MarketId;
@@ -39,6 +40,11 @@ export function readCustomFundDraftCache(marketId: MarketId): CustomFundDraftCac
   try {
     const parsed = JSON.parse(raw) as CustomFundDraftCache;
     if (parsed.marketId !== marketId || !Array.isArray(parsed.selectedAssets) || !parsed.draft) return null;
+    parsed.draft = {
+      ...parsed.draft,
+      startDate: parsed.draft.startDate || defaultStartDate(),
+      endDate: parsed.draft.endDate || todayDate(),
+    };
     return parsed;
   } catch {
     return null;

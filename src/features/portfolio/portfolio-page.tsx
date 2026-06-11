@@ -15,6 +15,7 @@ import { formatCurrency, formatNumber, formatOptionalCurrency, formatOptionalPer
 import { getMarketCopy, localeForLanguage, t, type Language } from "@/lib/i18n";
 import { createReturnToState, locationToReturnTo } from "@/lib/navigation-state";
 import type { AssetRecord, MarketId, Portfolio, PortfolioDcaPlan, PortfolioSummary, SearchSortKey } from "@/lib/types";
+import { defaultStartDate, todayDate } from "@/lib/utils";
 import { normalizeMarket, type Market } from "../../components/types";
 import {
   CalculateButton,
@@ -86,7 +87,7 @@ export function PortfolioPage({ market = "us", marketId, language: languageProp 
       setSelectedAssetMap(Object.fromEntries(cached.selectedAssets.map((asset) => [asset.id, asset])));
       setWeights(cached.weights);
       setDcaPlans(ensureDcaPlansForAssets(cached.dcaPlans, cached.selectedAssets, numericDraftValue(cached.draft.capital) || DEFAULT_CAPITAL, cached.weights));
-      setDraft(cached.draft);
+      setDraft(normalizePortfolioDraft(cached.draft, defaultPortfolioName, defaultGoal));
       setStatus(t(language, "portfolio.dcaDraftRestored"));
     } else {
       setSelectedPortfolioId("");
@@ -130,13 +131,7 @@ export function PortfolioPage({ market = "us", marketId, language: languageProp 
     setSelectedPortfolioId(portfolioId);
     resetCalculation();
     if (!portfolioId) {
-      setDraft((current) => ({
-        ...current,
-        name: defaultPortfolioName,
-        goal: defaultGoal,
-        riskPreference: "Balanced",
-        cashBalance: "0",
-      }));
+      setDraft(defaultPortfolioDraft(defaultPortfolioName, defaultGoal));
       setSelectedIds([]);
       setSelectedAssetMap({});
       setWeights({});
@@ -163,8 +158,8 @@ export function PortfolioPage({ market = "us", marketId, language: languageProp 
       riskPreference: saved.riskPreference || "Balanced",
       capital: String(saved.capital ?? DEFAULT_CAPITAL),
       cashBalance: String(saved.cashBalance ?? 0),
-      startDate: saved.startDate || "",
-      endDate: saved.endDate || new Date().toISOString().slice(0, 10),
+      startDate: saved.startDate || defaultStartDate(),
+      endDate: saved.endDate || todayDate(),
     }));
     setSelectedAssetMap(Object.fromEntries(assets.map((asset) => [asset.id, asset])));
     setSelectedIds(assets.map((asset) => asset.id));
@@ -635,8 +630,21 @@ function defaultPortfolioDraft(defaultName: string, defaultGoal: string): Portfo
     riskPreference: "Balanced",
     capital: "100000",
     cashBalance: "0",
-    startDate: "",
-    endDate: new Date().toISOString().slice(0, 10),
+    startDate: defaultStartDate(),
+    endDate: todayDate(),
+  };
+}
+
+function normalizePortfolioDraft(draft: PortfolioDraft, defaultName: string, defaultGoal: string): PortfolioDraft {
+  return {
+    ...draft,
+    name: draft.name || defaultName,
+    goal: draft.goal || defaultGoal,
+    riskPreference: draft.riskPreference || "Balanced",
+    capital: draft.capital || "100000",
+    cashBalance: draft.cashBalance || "0",
+    startDate: draft.startDate || defaultStartDate(),
+    endDate: draft.endDate || todayDate(),
   };
 }
 

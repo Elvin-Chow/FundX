@@ -15,6 +15,7 @@ import { formatCurrency, formatNumber, formatOptionalCurrency, formatOptionalPer
 import { assetTypeLabel, frequencyLabel, localeForLanguage, strategyLabel, t, type Language } from "@/lib/i18n";
 import { createReturnToState, locationToReturnTo } from "@/lib/navigation-state";
 import type { AssetRecord, DcaInput, DcaPlan, DcaSimulation, DcaStrategy, Frequency, Fund, MarketId, SearchSortKey } from "@/lib/types";
+import { defaultStartDate, todayDate } from "@/lib/utils";
 import { LoadingRows, StatusBanner, ToneText } from "../shared/feature-shell";
 import {
   CalculateButton,
@@ -67,8 +68,8 @@ function fallbackDraft(fundId = "", language: Language = "en"): DcaDraft {
     initialAmount: "1000",
     recurringAmount: "500",
     frequency: "monthly",
-    startDate: "",
-    endDate: new Date().toISOString().slice(0, 10),
+    startDate: defaultStartDate(),
+    endDate: todayDate(),
     reinvestDividends: true,
     transactionCost: "0",
     strategy: "standard",
@@ -514,6 +515,8 @@ function draftFromDcaInput(input: DcaInput & { name?: string }): DcaDraft {
   return {
     ...input,
     name: input.name ?? "",
+    startDate: input.startDate || defaultStartDate(),
+    endDate: input.endDate || todayDate(),
     initialAmount: String(input.initialAmount ?? 0),
     recurringAmount: String(input.recurringAmount ?? 0),
     transactionCost: String(input.transactionCost ?? 0),
