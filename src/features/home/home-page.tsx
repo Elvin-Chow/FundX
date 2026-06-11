@@ -9,11 +9,12 @@ import { useResolvedLanguage } from "@/hooks/use-language";
 import { apiGet } from "@/lib/api-client";
 import type { AssetDetailResponse, MarketTopResponse, PortfolioResponse } from "@/lib/api-contracts";
 import { localizedAssetSector } from "@/lib/asset-display";
+import { calculateCumulativeReturn, calculateDrawdown, simulateDcaPlan } from "@/lib/calculations";
 import { formatCompactCurrency, formatCurrency, formatNumber, formatOptionalCompactCurrency, formatOptionalPercent, formatPercent } from "@/lib/formatters";
 import { assetTypeLabel, getMarketCopy, t, type Language } from "@/lib/i18n";
 import { buildLocalPortfolioResponse } from "@/lib/local-user-data";
 import { createReturnToState, locationToReturnTo } from "@/lib/navigation-state";
-import type { AssetRecord, CustomFundRecord, CustomFundUniverseItem, MarketId, PortfolioSummary, TimePoint } from "@/lib/types";
+import type { AssetRecord, CustomFundRecord, CustomFundUniverseItem, DcaInput, Fund, MarketId, PortfolioDcaPlan, PortfolioSummary, TimePoint } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { normalizeMarket, type Market } from "../../components/types";
 import { readCustomFundResultCache } from "../custom-fund/custom-fund-result-store";
@@ -55,6 +56,9 @@ type CustomFundDisplayValue = {
   dailyChange: number | null;
   pricedCount: number;
   updatedAt?: string;
+  valueHistory?: TimePoint[];
+  backtestReturn?: number | null;
+  maxDrawdown?: number | null;
 };
 
 const autoTopRefreshInFlight = new Set<MarketId>();
@@ -139,7 +143,7 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
     return quotes;
   }, [homeQuoteRequests, homeQuotes.data]);
   const portfolioDisplay = useMemo(
-    () => (summary ? buildPortfolioDisplaySummary(summary, homeQuoteById) : null),
+    () => (summary && !hasCalculatedValueHistory(summary) ? buildPortfolioDisplaySummary(summary, homeQuoteById) : null),
     [homeQuoteById, summary],
   );
   const selectedCustomFundSummary = useMemo(
@@ -680,7 +684,10 @@ function buildHomeQuoteRequests(
     })));
   }
   if (selection?.kind === "customFund" && customFund) {
-    return [];
+    return uniqueQuoteRequests(customFund.holdings.map((holding) => ({
+      id: holding.stockId,
+      assetType: "stock",
+    })));
   }
   return [];
 }
@@ -759,6 +766,16 @@ function buildPortfolioDisplaySummary(summary: PortfolioSummary, quoteById: Map<
   };
 }
 
+function hasCalculatedValueHistory(summary: PortfolioSummary) {
+  return sanitizeTimePoints(summary.valueHistory).length > 0;
+}
+
+type CustomFundValueEstimate = {
+  valueHistory: TimePoint[];
+  pricedCount: number;
+  updatedAt?: string;
+};
+
 function buildCustomFundDisplayValue(
   fund: CustomFundRecord,
   resultSummary: PortfolioSummary | null,
@@ -766,24 +783,45 @@ function buildCustomFundDisplayValue(
   universeById: Map<string, CustomFundUniverseItem>,
 ): CustomFundDisplayValue {
   if (resultSummary) {
+    const valueHistory = sanitizeTimePoints(resultSummary.valueHistory);
     return {
       value: resultSummary.totalValue,
-      dailyChange: historyDailyChange(resultSummary.valueHistory),
+      dailyChange: historyDailyChange(valueHistory),
       pricedCount: resultSummary.holdings.length,
       updatedAt: fund.updatedAt,
+      valueHistory,
+      backtestReturn: calculateCumulativeReturn(valueHistory),
+      maxDrawdown: calculateDrawdown(valueHistory).maxDrawdown,
+    };
+  }
+
+  const estimate = buildCustomFundValueEstimate(fund, quoteById, universeById);
+  if (estimate.valueHistory.length) {
+    return {
+      value: latestHistoryValue(estimate.valueHistory),
+      dailyChange: historyDailyChange(estimate.valueHistory),
+      pricedCount: estimate.pricedCount,
+      updatedAt: estimate.updatedAt || fund.updatedAt,
+      valueHistory: estimate.valueHistory,
+      backtestReturn: calculateCumulativeReturn(estimate.valueHistory),
+      maxDrawdown: calculateDrawdown(estimate.valueHistory).maxDrawdown,
+    };
+  }
+
+  const fallbackHistory = sanitizeTimePoints(fund.score.backtestHistory);
+  if (!quoteById.size) {
+    return {
+      value: latestHistoryValue(fallbackHistory) ?? fund.capital ?? null,
+      dailyChange: historyDailyChange(fallbackHistory),
+      pricedCount: 0,
+      updatedAt: fund.updatedAt,
+      valueHistory: fallbackHistory,
+      backtestReturn: calculateCumulativeReturn(fallbackHistory),
+      maxDrawdown: calculateDrawdown(fallbackHistory).maxDrawdown,
     };
   }
 
   const baseValue = finitePositiveNumber(fund.capital) ?? CUSTOM_FUND_BASE_VALUE;
-  if (!quoteById.size) {
-    return {
-      value: fund.capital ?? latestHistoryValue(fund.score.backtestHistory),
-      dailyChange: historyDailyChange(fund.score.backtestHistory),
-      pricedCount: 0,
-      updatedAt: fund.updatedAt,
-    };
-  }
-
   const totalWeight = fund.holdings.reduce((total, holding) => total + Math.max(0, holding.weight), 0) || 100;
   let value = 0;
   let previousValue = 0;
@@ -815,10 +853,161 @@ function buildCustomFundDisplayValue(
   const roundedValue = roundCurrency(value);
   return {
     value: roundedValue,
-    dailyChange: previousValue > 0 ? roundPercent(returnPercent(previousValue, value)) : historyDailyChange(fund.score.backtestHistory),
+    dailyChange: previousValue > 0 ? roundPercent(returnPercent(previousValue, value)) : historyDailyChange(fallbackHistory),
+    pricedCount,
+    updatedAt: latestUpdatedAt || fund.updatedAt,
+    valueHistory: fallbackHistory,
+    backtestReturn: calculateCumulativeReturn(fallbackHistory),
+    maxDrawdown: calculateDrawdown(fallbackHistory).maxDrawdown,
+  };
+}
+
+function buildCustomFundValueEstimate(
+  fund: CustomFundRecord,
+  quoteById: Map<string, HomeAssetQuote>,
+  universeById: Map<string, CustomFundUniverseItem>,
+): CustomFundValueEstimate {
+  const baseValue = finitePositiveNumber(fund.capital) ?? CUSTOM_FUND_BASE_VALUE;
+  const cashBalance = finiteNumber(fund.cashBalance) ?? 0;
+  const totalWeight = fund.holdings.reduce((total, holding) => total + Math.max(0, holding.weight), 0) || 100;
+  const histories: TimePoint[][] = [];
+  let pricedCount = 0;
+  let latestUpdatedAt = "";
+
+  for (const holding of fund.holdings) {
+    const quote = quoteById.get(holding.stockId);
+    const universeAsset = universeById.get(holding.stockId);
+    const latestPrice = finitePositiveNumber(quote?.price) ?? finitePositiveNumber(universeAsset?.price);
+    const sourceHistory = quote?.history.length ? quote.history : sanitizeTimePoints(universeAsset?.priceHistory ?? []);
+    const history = withLatestHistoryPrice(sourceHistory, latestPrice, quote?.updatedAt ?? fund.updatedAt);
+    const weightShare = Math.max(0, holding.weight) / totalWeight;
+    const allocation = baseValue * weightShare;
+
+    if (quote?.updatedAt && (!latestUpdatedAt || quote.updatedAt > latestUpdatedAt)) latestUpdatedAt = quote.updatedAt;
+    if (!history.length || allocation <= 0) continue;
+
+    const plan = fund.dcaPlans?.[holding.stockId];
+    const valueHistory = plan?.enabled
+      ? buildCustomFundDcaValueHistory(fund, holding.stockId, plan, history, universeAsset)
+      : buildStaticCustomFundHoldingHistory(history, allocation, fund.startDate, fund.endDate);
+    if (!valueHistory.length) continue;
+    histories.push(valueHistory);
+    pricedCount += 1;
+  }
+
+  return {
+    valueHistory: combineValueHistories(histories, cashBalance),
     pricedCount,
     updatedAt: latestUpdatedAt || fund.updatedAt,
   };
+}
+
+function buildCustomFundDcaValueHistory(
+  fund: CustomFundRecord,
+  stockId: string,
+  plan: PortfolioDcaPlan,
+  history: TimePoint[],
+  asset: CustomFundUniverseItem | undefined,
+) {
+  const startDate = fund.startDate || history[0]?.date;
+  const endDate = fund.endDate || history.at(-1)?.date;
+  if (!startDate || !endDate) return [];
+  const input: DcaInput = {
+    fundId: stockId,
+    name: `${asset?.symbol ?? stockId} portfolio DCA`,
+    initialAmount: plan.initialAmount,
+    recurringAmount: plan.recurringAmount,
+    frequency: plan.frequency,
+    startDate,
+    endDate,
+    reinvestDividends: plan.reinvestDividends,
+    transactionCost: plan.transactionCost,
+    strategy: plan.strategy ?? "standard",
+  };
+  const fundForSimulation = {
+    id: stockId,
+    marketId: fund.marketId,
+    name: asset?.name ?? stockId,
+    symbol: asset?.symbol ?? stockId,
+    navHistory: history,
+    dividends: asset?.dividends ?? [],
+  } as Fund;
+  return sanitizeTimePoints(simulateDcaPlan(fundForSimulation, input).valueHistory);
+}
+
+function buildStaticCustomFundHoldingHistory(
+  history: TimePoint[],
+  allocation: number,
+  startDate: string | null | undefined,
+  endDate: string | null | undefined,
+) {
+  const sanitized = sanitizeTimePoints(history);
+  if (!sanitized.length || allocation <= 0) return [];
+  const startPrice = firstPriceOnOrAfter(sanitized, startDate) ?? firstHistoryValue(sanitized);
+  if (startPrice == null || startPrice <= 0) return [];
+  const quantity = allocation / startPrice;
+  const points = sanitized
+    .filter((point) => (!startDate || point.date >= startDate) && (!endDate || point.date <= endDate))
+    .map((point) => ({ date: point.date, value: roundCurrency(quantity * point.value) }));
+  if (startDate && points.length && points[0].date !== startDate) {
+    points.unshift({ date: startDate, value: roundCurrency(quantity * startPrice) });
+  }
+  return dedupeTimePoints(points);
+}
+
+function combineValueHistories(histories: TimePoint[][], baseValue: number) {
+  const cleanHistories = histories.map(dedupeTimePoints).filter((history) => history.length > 0);
+  const dates = Array.from(new Set(cleanHistories.flatMap((history) => history.map((point) => point.date)))).sort((left, right) => left.localeCompare(right));
+  if (!dates.length) return [];
+
+  const indexes = cleanHistories.map(() => 0);
+  const currentValues = cleanHistories.map<number | null>(() => null);
+  return dates.map((date) => {
+    cleanHistories.forEach((history, historyIndex) => {
+      let index = indexes[historyIndex];
+      while (index < history.length && history[index].date <= date) {
+        currentValues[historyIndex] = history[index].value;
+        index += 1;
+      }
+      indexes[historyIndex] = index;
+    });
+    let carriedValue = 0;
+    for (const current of currentValues) {
+      if (current != null) carriedValue += current;
+    }
+    const value = baseValue + carriedValue;
+    return { date, value: roundCurrency(value) };
+  });
+}
+
+function dedupeTimePoints(history: TimePoint[]) {
+  const byDate = new Map<string, TimePoint>();
+  for (const point of sanitizeTimePoints(history)) {
+    byDate.set(point.date, point);
+  }
+  return Array.from(byDate.values()).sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function withLatestHistoryPrice(history: TimePoint[], latestPrice: number | null | undefined, updatedAt: string | undefined) {
+  const sanitized = sanitizeTimePoints(history);
+  const latest = finitePositiveNumber(latestPrice);
+  const latestDate = datePart(updatedAt);
+  if (latest == null || !latestDate) return sanitized;
+  const existingIndex = sanitized.findIndex((point) => point.date === latestDate);
+  if (existingIndex >= 0) {
+    return sanitized.map((point, index) => index === existingIndex ? { ...point, value: latest } : point);
+  }
+  const lastDate = sanitized.at(-1)?.date;
+  if (!lastDate || latestDate > lastDate) {
+    return [...sanitized, { date: latestDate, value: latest }];
+  }
+  return sanitized;
+}
+
+function firstPriceOnOrAfter(history: TimePoint[], date: string | null | undefined) {
+  const sanitized = sanitizeTimePoints(history);
+  if (!date) return firstHistoryValue(sanitized);
+  return finitePositiveNumber(sanitized.find((point) => point.date >= date)?.value) ?? finitePositiveNumber(sanitized.at(-1)?.value) ?? null;
 }
 
 function resolveCustomFundResultSummary(fund: CustomFundRecord, cache: ReturnType<typeof readCustomFundResultCache>) {
@@ -863,9 +1052,9 @@ function customFundDescription(fund: CustomFundRecord, language: Language, displ
   const summary = t(language, "home.customFundSummary", {
     style: fund.style,
     count: formatNumber(fund.holdings.length),
-    returnValue: formatPercent(customFundBacktestReturn(fund), 1),
+    returnValue: formatPercent(display?.backtestReturn ?? customFundBacktestReturn(fund), 1),
     dividend: formatPercent(fund.score.dividendYield),
-    drawdown: formatPercent(fund.score.maxDrawdown),
+    drawdown: formatPercent(display?.maxDrawdown ?? fund.score.maxDrawdown),
     updated: formatHktTimestamp(display?.updatedAt ?? fund.updatedAt),
   });
   const dailyChange = display?.dailyChange == null ? null : `${t(language, "compare.dailyChange")} ${formatPercent(display.dailyChange)}`;
@@ -1004,6 +1193,14 @@ function roundPercent(value: number) {
 
 function normalizeWeightPercent(value: number) {
   return value <= 1 ? value * 100 : value;
+}
+
+function datePart(value: string | undefined) {
+  if (!value) return null;
+  const direct = value.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+  if (direct) return direct;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
 
 function formatHktTimestamp(value: string) {
