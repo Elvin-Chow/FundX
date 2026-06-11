@@ -36,7 +36,11 @@ export function FundDetailPage({ market = "us", marketId, fundId, language = "en
     (signal: AbortSignal) => apiGet<FundDetailResponse>(`/api/funds/${fundId}`, { market: activeMarket }, signal),
     [activeMarket, fundId],
   );
-  const resource = useApiResource(load, [load], { keepPreviousData: false });
+  const resource = useApiResource(load, [load], {
+    cacheKey: `fund-detail:${activeMarket}:${fundId}`,
+    keepPreviousData: false,
+    staleTimeMs: 60_000,
+  });
   const fund = resource.data?.fund;
   const backHref = readReturnToState(location.state, `/discover?market=${activeMarket}&lang=${language}`);
   const backButton = (

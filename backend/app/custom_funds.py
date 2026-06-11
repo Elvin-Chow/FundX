@@ -15,6 +15,7 @@ from .services import (
     asset_kind,
     browser_local_user_data_enabled,
     calculate_drawdown,
+    daily_price_history_index,
     get_db_path,
     is_public_market_asset,
     get_market_data_meta,
@@ -133,9 +134,10 @@ def list_custom_fund_universe(
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     stock_by_id = {stock.get("id"): stock for stock in db.get("stocks", []) if stock.get("marketId") == market_id}
+    history_index = daily_price_history_index(db, market_id)
     for asset in iter_custom_fund_assets(db, market_id):
         stock = stock_by_id.get(asset.get("id"), {})
-        history = real_stock_history(db, market_id, str(asset.get("id") or ""))
+        history = real_stock_history(db, market_id, str(asset.get("id") or ""), history_index)
         latest_price = (
             asset.get("latestPrice")
             if isinstance(asset.get("latestPrice"), (int, float))
@@ -425,7 +427,14 @@ def market_stocks(db: dict[str, Any], market_id: MarketId) -> list[dict[str, Any
     return list_custom_fund_universe(db, market_id, include_history=True)
 
 
-def real_stock_history(db: dict[str, Any], market_id: MarketId, stock_id: str) -> list[dict[str, Any]]:
+def real_stock_history(
+    db: dict[str, Any],
+    market_id: MarketId,
+    stock_id: str,
+    history_index: dict[tuple[str, str], list[dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
+    if history_index is not None:
+        return list(history_index.get((stock_id, "stock"), []))
     points = sorted(
         (
             point

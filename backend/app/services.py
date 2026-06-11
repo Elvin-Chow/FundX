@@ -19,6 +19,8 @@ LOCAL_USER_ID = "local-user"
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PRIMARY_DB_PATH = REPO_ROOT / ".fundx" / "fundx-db.json"
 FALLBACK_DB_PATH = REPO_ROOT / "data" / "fundx.db.json"
+_DB_CACHE_SIGNATURE: tuple[str, int, int] | None = None
+_DB_CACHE_DATA: dict[str, Any] | None = None
 
 US_SECTORS = [
     "Technology",
@@ -67,11 +69,17 @@ def read_db() -> dict[str, Any]:
             details={"checked": [str(PRIMARY_DB_PATH), str(FALLBACK_DB_PATH)]},
         )
 
-    import json
+    global _DB_CACHE_DATA, _DB_CACHE_SIGNATURE
+    signature = db_file_signature(path)
+    if _DB_CACHE_SIGNATURE == signature and _DB_CACHE_DATA is not None:
+        return _DB_CACHE_DATA
 
     with path.open("r", encoding="utf-8") as handle:
         raw = json.load(handle)
-    return normalize_db(raw)
+    normalized = normalize_db(raw)
+    _DB_CACHE_SIGNATURE = signature
+    _DB_CACHE_DATA = normalized
+    return normalized
 
 
 def read_raw_db() -> tuple[Path, dict[str, Any], dict[str, Any]]:
@@ -102,9 +110,21 @@ def update_db(mutator: Callable[[dict[str, Any]], Any]) -> dict[str, Any]:
     temp_path.write_text(f"{json.dumps(raw, ensure_ascii=False, indent=2)}\n", encoding="utf-8")
     temp_path.replace(path)
     normalized = normalize_db(raw)
+    set_db_cache(path, normalized)
     if isinstance(result, dict):
         result.setdefault("_db", normalized)
     return normalized
+
+
+def db_file_signature(path: Path) -> tuple[str, int, int]:
+    stats = path.stat()
+    return (str(path.resolve()), stats.st_mtime_ns, stats.st_size)
+
+
+def set_db_cache(path: Path, data: dict[str, Any]) -> None:
+    global _DB_CACHE_DATA, _DB_CACHE_SIGNATURE
+    _DB_CACHE_SIGNATURE = db_file_signature(path)
+    _DB_CACHE_DATA = data
 
 
 def ensure_collections(db: dict[str, Any]) -> None:
@@ -366,6 +386,7 @@ def funds_payload(market_id: MarketId, refresh_value: str | None = None, user_id
 
 def list_real_funds(db: dict[str, Any], market_id: MarketId) -> list[dict[str, Any]]:
     funds_by_id = {fund.get("id"): fund for fund in db.get("funds", []) if fund.get("marketId") == market_id}
+    history_index = daily_price_history_index(db, market_id)
     result: list[dict[str, Any]] = []
     for asset in db.get("assets", []):
         if asset.get("marketId") != market_id:
@@ -378,7 +399,7 @@ def list_real_funds(db: dict[str, Any], market_id: MarketId) -> list[dict[str, A
             continue
         asset = normalize_asset_record(asset)
         base = funds_by_id.get(asset.get("id"), {})
-        history = list_real_asset_history(db, market_id, str(asset.get("id")), "fund")
+        history = list_real_asset_history(db, market_id, str(asset.get("id")), "fund", history_index)
         latest_price = asset.get("latestPrice") if isinstance(asset.get("latestPrice"), (int, float)) else base.get("nav")
         result.append(
             {
@@ -414,6 +435,7 @@ def list_real_funds(db: dict[str, Any], market_id: MarketId) -> list[dict[str, A
 
 def list_real_stocks(db: dict[str, Any], market_id: MarketId) -> list[dict[str, Any]]:
     stocks_by_id = {stock.get("id"): stock for stock in db.get("stocks", []) if stock.get("marketId") == market_id}
+    history_index = daily_price_history_index(db, market_id)
     result: list[dict[str, Any]] = []
     for asset in db.get("assets", []):
         if asset.get("marketId") != market_id or asset_kind(asset) != "stock":
@@ -450,29 +472,40 @@ def list_real_stocks(db: dict[str, Any], market_id: MarketId) -> list[dict[str, 
                 "valueScore": None,
                 "qualityScore": None,
                 "riskScore": None,
-                "priceHistory": list_real_asset_history(db, market_id, str(asset.get("id")), "stock"),
+                "priceHistory": list_real_asset_history(db, market_id, str(asset.get("id")), "stock", history_index),
                 "dividends": base.get("dividends") if isinstance(base.get("dividends"), list) else [],
             }
         )
     return result
 
 
-def list_real_asset_history(db: dict[str, Any], market_id: MarketId, asset_id: str, kind: AssetKind) -> list[dict[str, Any]]:
-    prices = sorted(
-        (
-            point
-            for point in db.get("dailyPrices", [])
-            if point.get("marketId") == market_id
-            and point.get("assetId") == asset_id
-            and daily_price_kind(point) == kind
-            and (isinstance(point.get("nav"), (int, float)) or isinstance(point.get("close"), (int, float)))
-        ),
-        key=lambda point: str(point.get("date") or ""),
-    )
-    return [
-        {"date": point.get("date"), "value": point.get("nav") if kind == "fund" and isinstance(point.get("nav"), (int, float)) else point.get("close")}
-        for point in prices
-    ]
+DailyPriceHistoryIndex = dict[tuple[str, AssetKind], list[dict[str, Any]]]
+
+
+def daily_price_history_index(db: dict[str, Any], market_id: MarketId) -> DailyPriceHistoryIndex:
+    index: DailyPriceHistoryIndex = {}
+    for point in db.get("dailyPrices", []):
+        if point.get("marketId") != market_id or not point.get("assetId"):
+            continue
+        kind = daily_price_kind(point)
+        if not (isinstance(point.get("nav"), (int, float)) or isinstance(point.get("close"), (int, float))):
+            continue
+        value = point.get("nav") if kind == "fund" and isinstance(point.get("nav"), (int, float)) else point.get("close")
+        index.setdefault((str(point.get("assetId")), kind), []).append({"date": point.get("date"), "value": value})
+    for history in index.values():
+        history.sort(key=lambda point: str(point.get("date") or ""))
+    return index
+
+
+def list_real_asset_history(
+    db: dict[str, Any],
+    market_id: MarketId,
+    asset_id: str,
+    kind: AssetKind,
+    history_index: DailyPriceHistoryIndex | None = None,
+) -> list[dict[str, Any]]:
+    resolved_index = history_index if history_index is not None else daily_price_history_index(db, market_id)
+    return list(resolved_index.get((asset_id, kind), []))
 
 
 def daily_price_kind(point: dict[str, Any]) -> AssetKind:

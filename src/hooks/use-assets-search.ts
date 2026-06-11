@@ -28,7 +28,13 @@ export function useAssetsSearch(marketId: MarketId, initial: Partial<AssetSearch
     pageSize: 12,
     ...initial,
   });
+  const [debouncedQuery, setDebouncedQuery] = useState(filters.q.trim());
   const previousMarketId = useRef(marketId);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedQuery(filters.q.trim()), 300);
+    return () => window.clearTimeout(timer);
+  }, [filters.q]);
 
   useEffect(() => {
     if (previousMarketId.current === marketId) return;
@@ -36,12 +42,13 @@ export function useAssetsSearch(marketId: MarketId, initial: Partial<AssetSearch
     setFilters((current) => ({ ...current, industry: "", fundType: "", page: 1 }));
   }, [marketId]);
 
-  const params = useMemo(() => ({ market: marketId, ...filters }), [filters, marketId]);
+  const params = useMemo(() => ({ market: marketId, ...filters, q: debouncedQuery }), [debouncedQuery, filters, marketId]);
+  const cacheKey = useMemo(() => `assets-search:${JSON.stringify(params)}`, [params]);
   const load = useCallback(
     (signal: AbortSignal) => apiGet<AssetSearchResponse>("/api/assets/search", params, signal),
     [params],
   );
-  const resource = useApiResource(load, [load], { keepPreviousData: true });
+  const resource = useApiResource(load, [load], { cacheKey, keepPreviousData: true, staleTimeMs: 30_000 });
   const refreshResource = resource.refresh;
 
   useEffect(() => {

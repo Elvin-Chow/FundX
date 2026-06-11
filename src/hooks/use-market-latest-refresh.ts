@@ -8,6 +8,7 @@ import type { MarketId } from "@/lib/types";
 export const MARKET_LATEST_REFRESH_EVENT = "fundx:market-latest-refreshed";
 
 const MARKET_LATEST_AUTO_CHECK_MS = 5 * 60 * 1000;
+const MARKET_LATEST_INITIAL_DELAY_MS = 15_000;
 const marketLatestInFlight = new Set<MarketId>();
 const marketLatestCheckMemory = new Map<MarketId, number>();
 
@@ -16,6 +17,7 @@ export function useMarketLatestRefresh(marketId: MarketId) {
     let stopped = false;
 
     function run() {
+      if (isDocumentHidden()) return;
       if (!isMarketLatestAutoWindow()) return;
       if (!claimMarketLatestRefreshCheck(marketId)) return;
       void apiPost<JobsResponse>("/api/jobs", { marketId, type: "sync-market-latest" }, { market: marketId })
@@ -33,10 +35,11 @@ export function useMarketLatestRefresh(marketId: MarketId) {
         });
     }
 
-    run();
+    const initialTimer = window.setTimeout(run, MARKET_LATEST_INITIAL_DELAY_MS);
     const interval = window.setInterval(run, MARKET_LATEST_AUTO_CHECK_MS);
     return () => {
       stopped = true;
+      window.clearTimeout(initialTimer);
       window.clearInterval(interval);
     };
   }, [marketId]);
@@ -83,6 +86,10 @@ function marketLatestJobUpdatedData(result: Record<string, unknown> | undefined)
 
 function numericResult(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function isDocumentHidden() {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
 }
 
 function isMarketLatestAutoWindow(now = new Date()) {

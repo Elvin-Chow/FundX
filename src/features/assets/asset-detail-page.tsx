@@ -74,7 +74,11 @@ export function AssetDetailPage({
     }, signal),
     [activeMarket, assetId, assetType],
   );
-  const resource = useApiResource(load, [load], { keepPreviousData: true });
+  const resource = useApiResource(load, [load], {
+    cacheKey: `asset-detail:${activeMarket}:${assetType ?? "all"}:${assetId}`,
+    keepPreviousData: true,
+    staleTimeMs: 60_000,
+  });
   const detailData = calculation.result ?? resource.data;
   const asset = detailData?.asset;
   const history = detailData?.history ?? [];

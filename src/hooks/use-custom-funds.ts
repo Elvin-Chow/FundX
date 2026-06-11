@@ -22,7 +22,7 @@ export function useCustomFunds(marketId: MarketId) {
     },
     [marketId],
   );
-  const resource = useApiResource(load, [load], { keepPreviousData: false });
+  const resource = useApiResource(load, [load], { cacheKey: `custom-funds:${marketId}`, keepPreviousData: false, staleTimeMs: 60_000 });
 
   async function saveCustomFund(input: CustomFundSaveInput) {
     createLocalCustomFund(marketId, input, resource.data?.universe ?? []);

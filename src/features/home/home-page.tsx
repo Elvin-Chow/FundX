@@ -92,7 +92,11 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
     },
     [activeMarket],
   );
-  const marketTops = useApiResource(loadMarketTops, [loadMarketTops], { keepPreviousData: true });
+  const marketTops = useApiResource(loadMarketTops, [loadMarketTops], {
+    cacheKey: `home-market-tops:${activeMarket}`,
+    keepPreviousData: true,
+    staleTimeMs: TOP_CACHE_MAX_AGE_MS,
+  });
   const liveTopStocks = useMemo(() => sanitizeTopAssetsResponse(marketTops.data?.marketId === activeMarket ? marketTops.data.stocks : null), [activeMarket, marketTops.data]);
   const liveTopFunds = useMemo(() => sanitizeTopAssetsResponse(marketTops.data?.marketId === activeMarket ? marketTops.data.funds : null), [activeMarket, marketTops.data]);
   const displayedTopStocks = useMemo(() => liveTopStocks ?? sanitizeTopAssetsResponse(cachedTopStocks), [cachedTopStocks, liveTopStocks]);
@@ -112,11 +116,20 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
     () => buildHomeQuoteRequests(homeSelection, portfolio, selectedCustomFund),
     [homeSelection, portfolio, selectedCustomFund],
   );
+  const homeQuoteCacheKey = useMemo(
+    () => `home-quotes:${activeMarket}:${homeQuoteRequests.map((request) => `${request.assetType}:${request.id}`).join(",")}`,
+    [activeMarket, homeQuoteRequests],
+  );
   const loadHomeQuotes = useCallback(
     (signal: AbortSignal) => loadLatestHomeAssetQuotes(activeMarket, homeQuoteRequests, signal),
     [activeMarket, homeQuoteRequests],
   );
-  const homeQuotes = useApiResource(loadHomeQuotes, [loadHomeQuotes], { enabled: homeQuoteRequests.length > 0, keepPreviousData: true });
+  const homeQuotes = useApiResource(loadHomeQuotes, [loadHomeQuotes], {
+    cacheKey: homeQuoteCacheKey,
+    enabled: homeQuoteRequests.length > 0,
+    keepPreviousData: true,
+    staleTimeMs: 60_000,
+  });
   const homeQuoteById = useMemo(() => {
     const selectedIds = new Set(homeQuoteRequests.map((request) => request.id));
     const quotes = new Map<string, HomeAssetQuote>();
@@ -260,8 +273,8 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
       return;
     }
     if (shouldAutoRefreshTopMarkets(activeMarket)) {
-      void refreshTopMarkets("auto");
-      return;
+      const timeout = window.setTimeout(() => void refreshTopMarkets("auto"), TOP_AUTO_REFRESH_DELAY_MS);
+      return () => window.clearTimeout(timeout);
     }
     setTopRefreshStatus(topRefreshCopy(language, liveTopStocks && liveTopFunds ? "cached" : "ready"));
     return;
@@ -622,6 +635,7 @@ function symbolRouteSlug(symbol: string) {
 }
 
 const TOP_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+const TOP_AUTO_REFRESH_DELAY_MS = 8_000;
 type TopRefreshState = "ready" | "cached" | "refreshing" | "updated" | "fresh" | "failed";
 
 function topRefreshCopy(language: Language, state: TopRefreshState) {
@@ -684,22 +698,20 @@ function uniqueQuoteRequests(requests: HomeAssetQuoteRequest[]) {
 }
 
 async function loadLatestHomeAssetQuotes(marketId: MarketId, requests: HomeAssetQuoteRequest[], signal: AbortSignal) {
-  const quotes: HomeAssetQuote[] = [];
-  for (const request of requests) {
-    if (signal.aborted) break;
+  const quotes = await Promise.all(requests.map(async (request) => {
+    if (signal.aborted) return null;
     try {
       const response = await apiGet<AssetDetailResponse>(
         `/api/assets/${encodeURIComponent(request.id)}`,
-        { market: marketId, type: request.assetType, refresh: true },
+        { market: marketId, type: request.assetType },
         signal,
       );
-      const quote = homeAssetQuoteFromDetail(response, request);
-      if (quote) quotes.push(quote);
+      return homeAssetQuoteFromDetail(response, request);
     } catch {
-      continue;
+      return null;
     }
-  }
-  return quotes;
+  }));
+  return quotes.filter((quote): quote is HomeAssetQuote => quote !== null);
 }
 
 function homeAssetQuoteFromDetail(response: AssetDetailResponse, request: HomeAssetQuoteRequest): HomeAssetQuote | null {
