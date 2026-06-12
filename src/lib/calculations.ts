@@ -494,15 +494,33 @@ function finiteMetric(value: unknown): number {
 }
 
 function buildCustomFundBacktest(selected: Array<{ holding: CustomFundHolding; stock: Stock }>): TimePoint[] {
-  const baseHistory = selected[0]?.stock.priceHistory ?? [];
-  return baseHistory.map((point, index) => {
-    const value = sumBy(selected, ({ holding, stock }) => {
-      const base = stock.priceHistory[0]?.value ?? stock.price;
-      const current = stock.priceHistory[index]?.value ?? stock.priceHistory.at(-1)?.value ?? stock.price;
-      return (holding.weight / 100) * 100 * (base === 0 ? 1 : current / base);
-    });
-    return { date: point.date, value: round(value, 2) };
+  const histories = selected.map(({ stock }) => priceHistoryByDate(stock));
+  if (!histories.length || histories.some((history) => history.size === 0)) return [];
+
+  const [firstHistory, ...restHistories] = histories;
+  const commonDates = Array.from(firstHistory.keys())
+    .filter((date) => restHistories.every((history) => history.has(date)))
+    .sort((left, right) => left.localeCompare(right));
+  if (!commonDates.length) return [];
+
+  const bases = histories.map((history) => history.get(commonDates[0]) ?? 0);
+  return commonDates.map((date) => {
+    const value = selected.reduce((total, { holding }, index) => {
+      const base = bases[index] ?? 0;
+      const current = histories[index].get(date) ?? 0;
+      return total + (holding.weight / 100) * 100 * (base === 0 ? 1 : current / base);
+    }, 0);
+    return { date, value: round(value, 2) };
   });
+}
+
+function priceHistoryByDate(stock: Stock): Map<string, number> {
+  const history = new Map<string, number>();
+  for (const point of stock.priceHistory ?? []) {
+    if (!point.date || !Number.isFinite(point.value)) continue;
+    history.set(point.date, point.value);
+  }
+  return history;
 }
 
 export function generatePortfolioInsights(portfolio: Portfolio, funds: Fund[], stocks: Stock[]): Insight[] {

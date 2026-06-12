@@ -76,13 +76,23 @@ export function getRuntimeConfig() {
   loadEnvFiles();
 
   const dataDir = resolveProjectPath(process.env.FUNDX_DATA_DIR, "data");
-  const dbFile = resolveProjectPath(process.env.FUNDX_DB_FILE, path.join(dataDir, "fundx.db.json"));
+  const primaryDbFile = resolveProjectPath(undefined, ".fundx/fundx-db.json");
+  const fallbackDbFile = resolveProjectPath(undefined, path.join(dataDir, "fundx.db.json"));
+  const configuredDbPath = process.env.FUNDX_DB_PATH || process.env.FUNDX_DB_FILE;
+  const dbSelection = configuredDbPath
+    ? { file: resolveProjectPath(configuredDbPath), source: process.env.FUNDX_DB_PATH ? "FUNDX_DB_PATH" : "FUNDX_DB_FILE" }
+    : existsSync(primaryDbFile)
+    ? { file: primaryDbFile, source: "primary .fundx/fundx-db.json" }
+    : { file: fallbackDbFile, source: "fallback data/fundx.db.json" };
 
   return {
     appEnv: process.env.FUNDX_APP_ENV ?? process.env.NODE_ENV ?? "development",
     baseUrl: process.env.FUNDX_BASE_URL ?? "http://localhost:3000",
     dataDir,
-    dbFile,
+    dbFile: dbSelection.file,
+    dbFileSource: dbSelection.source,
+    primaryDbFile,
+    fallbackDbFile,
     backupDir: resolveProjectPath(process.env.FUNDX_BACKUP_DIR, "backups"),
     backupRetentionDays: parseInteger(process.env.FUNDX_BACKUP_RETENTION_DAYS, 14, { min: 1 }),
     logDir: resolveProjectPath(process.env.FUNDX_LOG_DIR, "logs"),

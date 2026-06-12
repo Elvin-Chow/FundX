@@ -728,20 +728,22 @@ export function exportLocalSettings(marketId: MarketId): SettingsExportPayload {
 }
 
 export function importLocalSettings(marketId: MarketId, payload: SettingsExportPayload, mode: SettingsImportMode): SettingsImportResponse {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Imported settings must be a JSON object.");
   if (payload.marketId !== marketId) throw new Error("Imported settings market does not match the active market.");
+  const normalizedPayload = normalizeSettingsImportPayload(marketId, payload);
   const counts = {
-    portfolios: payload.portfolios?.length ?? 0,
-    customFunds: payload.customFunds?.length ?? 0,
-    dcaPlans: payload.dcaPlans?.length ?? 0,
-    watchlist: payload.watchlist?.length ?? 0,
-    reports: payload.reports?.length ?? 0,
-    portfolioVersions: payload.portfolioVersions?.length ?? 0,
-    transactions: payload.transactions?.length ?? 0,
-    cashMovements: payload.cashMovements?.length ?? 0,
-    portfolioSnapshots: payload.portfolioSnapshots?.length ?? 0,
-    rebalanceSuggestions: payload.rebalanceSuggestions?.length ?? 0,
-    insightRecommendations: payload.insightRecommendations?.length ?? 0,
-    preferences: payload.preferences?.length ?? 0,
+    portfolios: normalizedPayload.portfolios.length,
+    customFunds: normalizedPayload.customFunds.length,
+    dcaPlans: normalizedPayload.dcaPlans.length,
+    watchlist: normalizedPayload.watchlist.length,
+    reports: normalizedPayload.reports.length,
+    portfolioVersions: normalizedPayload.portfolioVersions?.length ?? 0,
+    transactions: normalizedPayload.transactions?.length ?? 0,
+    cashMovements: normalizedPayload.cashMovements?.length ?? 0,
+    portfolioSnapshots: normalizedPayload.portfolioSnapshots?.length ?? 0,
+    rebalanceSuggestions: normalizedPayload.rebalanceSuggestions?.length ?? 0,
+    insightRecommendations: normalizedPayload.insightRecommendations?.length ?? 0,
+    preferences: normalizedPayload.preferences?.length ?? 0,
   };
   mutateLocalUserData((data) => {
     if (mode === "replace") {
@@ -757,26 +759,286 @@ export function importLocalSettings(marketId: MarketId, payload: SettingsExportP
       data.reports = data.reports.filter((item) => item.marketId !== marketId);
       data.insightRecommendations = data.insightRecommendations.filter((item) => (item.simulationSummary as { marketId?: MarketId }).marketId !== marketId);
     }
-    data.portfolios.unshift(...clone(payload.portfolios ?? []).map((item) => ({ ...item, userId: BROWSER_USER_ID, marketId })));
-    data.portfolioVersions.unshift(...clone(payload.portfolioVersions ?? []).map((item) => ({ ...item, userId: BROWSER_USER_ID, marketId })));
-    data.transactions.unshift(...clone(payload.transactions ?? []).map((item) => ({ ...item, userId: BROWSER_USER_ID, marketId })));
-    data.cashMovements.unshift(...clone(payload.cashMovements ?? []).map((item) => ({ ...item, userId: BROWSER_USER_ID, marketId })));
-    data.portfolioSnapshots.unshift(...clone(payload.portfolioSnapshots ?? []).map((item) => ({ ...item, userId: BROWSER_USER_ID, marketId })));
-    data.rebalanceSuggestions.unshift(...clone(payload.rebalanceSuggestions ?? []).map((item) => ({ ...item, userId: BROWSER_USER_ID, marketId })));
-    data.customFunds.unshift(...clone(payload.customFunds ?? []).map((item) => ({ ...item, userId: BROWSER_USER_ID, marketId })));
-    data.dcaPlans.unshift(...clone(payload.dcaPlans ?? []).map((item) => ({ ...item, userId: BROWSER_USER_ID, marketId })));
-    data.watchlist.unshift(...clone(payload.watchlist ?? []).map((item) => ({ ...item, userId: BROWSER_USER_ID, marketId })));
-    data.reports.unshift(...clone(payload.reports ?? []).map((item) => ({ ...item, userId: BROWSER_USER_ID, marketId })));
+    data.portfolios.unshift(...clone(normalizedPayload.portfolios));
+    data.portfolioVersions.unshift(...clone(normalizedPayload.portfolioVersions ?? []));
+    data.transactions.unshift(...clone(normalizedPayload.transactions ?? []));
+    data.cashMovements.unshift(...clone(normalizedPayload.cashMovements ?? []));
+    data.portfolioSnapshots.unshift(...clone(normalizedPayload.portfolioSnapshots ?? []));
+    data.rebalanceSuggestions.unshift(...clone(normalizedPayload.rebalanceSuggestions ?? []));
+    data.customFunds.unshift(...clone(normalizedPayload.customFunds));
+    data.dcaPlans.unshift(...clone(normalizedPayload.dcaPlans));
+    data.watchlist.unshift(...clone(normalizedPayload.watchlist));
+    data.reports.unshift(...clone(normalizedPayload.reports));
     data.insightRecommendations.unshift(
-      ...clone(payload.insightRecommendations ?? []).map((item) => ({
+      ...clone(normalizedPayload.insightRecommendations ?? []).map((item) => ({
         ...(item as LocalInsightRecommendation),
         simulationSummary: { ...((item as LocalInsightRecommendation).simulationSummary ?? {}), marketId },
       })),
     );
-    if (payload.activePortfolio?.id) data.activePortfolioByMarket[marketId] = payload.activePortfolio.id;
+    if (normalizedPayload.activePortfolio?.id) data.activePortfolioByMarket[marketId] = normalizedPayload.activePortfolio.id;
     return counts;
   });
   return { ok: true, marketId, mode, imported: counts, idChanges: 0, message: "Settings imported locally." };
+}
+
+function normalizeSettingsImportPayload(marketId: MarketId, payload: SettingsExportPayload): SettingsExportPayload {
+  const portfolios = requiredImportArray(payload, "portfolios").map((item, index) => normalizeImportedPortfolio(item, index, marketId)).filter((item): item is Portfolio => Boolean(item));
+  const activePortfolio = isPlainRecord(payload.activePortfolio) ? normalizeImportedPortfolio(payload.activePortfolio, 0, marketId) ?? undefined : undefined;
+
+  return {
+    ...payload,
+    marketId,
+    generatedAt: safeString(payload.generatedAt) || nowIso(),
+    portfolios,
+    activePortfolio,
+    portfolioVersions: optionalImportArray(payload, "portfolioVersions").map((item, index) => normalizeImportedPortfolioVersion(item, index, marketId)).filter((item): item is PortfolioVersionRecord => Boolean(item)),
+    transactions: normalizeImportedMarketRecords<Transaction>(optionalImportArray(payload, "transactions"), marketId),
+    cashMovements: normalizeImportedMarketRecords<CashMovement>(optionalImportArray(payload, "cashMovements"), marketId),
+    portfolioSnapshots: normalizeImportedMarketRecords<PortfolioSnapshot>(optionalImportArray(payload, "portfolioSnapshots"), marketId),
+    rebalanceSuggestions: normalizeImportedMarketRecords<RebalanceSuggestion>(optionalImportArray(payload, "rebalanceSuggestions"), marketId),
+    customFunds: requiredImportArray(payload, "customFunds").map((item, index) => normalizeImportedCustomFund(item, index, marketId)).filter((item): item is CustomFundRecord => Boolean(item)),
+    dcaPlans: normalizeImportedMarketRecords<DcaPlan>(requiredImportArray(payload, "dcaPlans"), marketId),
+    watchlist: normalizeImportedMarketRecords<WatchlistItem>(requiredImportArray(payload, "watchlist"), marketId),
+    reports: normalizeImportedMarketRecords<ReportRecord>(requiredImportArray(payload, "reports"), marketId),
+    insightRecommendations: optionalImportArray(payload, "insightRecommendations").filter(isPlainRecord),
+    preferences: optionalImportArray(payload, "preferences").filter(isPlainRecord) as SettingsExportPayload["preferences"],
+  };
+}
+
+function requiredImportArray(payload: SettingsExportPayload, key: keyof SettingsExportPayload): unknown[] {
+  return importArrayField(payload, key);
+}
+
+function optionalImportArray(payload: SettingsExportPayload, key: keyof SettingsExportPayload): unknown[] {
+  return importArrayField(payload, key);
+}
+
+function importArrayField(payload: SettingsExportPayload, key: keyof SettingsExportPayload): unknown[] {
+  const value = payload[key];
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw new Error(`Imported settings field "${String(key)}" must be an array.`);
+  return value;
+}
+
+function normalizeImportedMarketRecords<T>(values: unknown[], marketId: MarketId): T[] {
+  return values
+    .filter(isPlainRecord)
+    .map((item) => ({ ...clone(item), userId: BROWSER_USER_ID, marketId }) as T);
+}
+
+function normalizeImportedPortfolio(value: unknown, index: number, marketId: MarketId): Portfolio | null {
+  if (!isPlainRecord(value)) return null;
+  const id = safeString(value.id) || createId("portfolio");
+  const now = nowIso();
+  return {
+    ...clone(value),
+    id,
+    userId: BROWSER_USER_ID,
+    marketId,
+    name: safeString(value.name) || `Imported Portfolio ${index + 1}`,
+    currency: "USD",
+    goal: safeString(value.goal) || "Imported portfolio",
+    riskPreference: safeString(value.riskPreference) || "Balanced",
+    cashBalance: finiteNumber(value.cashBalance),
+    capital: nullableNumber(value.capital),
+    startDate: safeString(value.startDate) || null,
+    endDate: safeString(value.endDate) || null,
+    dcaPlans: isPlainRecord(value.dcaPlans) ? (clone(value.dcaPlans) as Record<string, PortfolioDcaPlan>) : {},
+    valueHistory: normalizeTimePoints(value.valueHistory),
+    contributionHistory: normalizeTimePoints(value.contributionHistory),
+    createdAt: safeString(value.createdAt) || now,
+    updatedAt: safeString(value.updatedAt) || now,
+    holdings: normalizeImportedHoldings(value.holdings, id, marketId),
+  };
+}
+
+function normalizeImportedPortfolioVersion(value: unknown, index: number, marketId: MarketId): PortfolioVersionRecord | null {
+  if (!isPlainRecord(value)) return null;
+  const data = normalizeImportedPortfolio(value.data, index, marketId);
+  const portfolioId = safeString(value.portfolioId) || data?.id || "";
+  if (!portfolioId) return null;
+  return {
+    ...clone(value),
+    id: safeString(value.id) || createId("portfolio-version"),
+    userId: BROWSER_USER_ID,
+    portfolioId,
+    marketId,
+    version: positiveInteger(value.version, index + 1),
+    name: safeString(value.name) || `Imported version ${index + 1}`,
+    savedAt: safeString(value.savedAt) || nowIso(),
+    data: data ?? normalizeImportedPortfolio({ id: portfolioId }, index, marketId)!,
+  };
+}
+
+function normalizeImportedHoldings(value: unknown, portfolioId: string, marketId: MarketId): Holding[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => normalizeImportedHolding(item, index, portfolioId, marketId))
+    .filter((item): item is Holding => Boolean(item));
+}
+
+function normalizeImportedHolding(value: unknown, index: number, portfolioId: string, marketId: MarketId): Holding | null {
+  if (!isPlainRecord(value)) return null;
+  const assetId = safeString(value.assetId);
+  if (!assetId) return null;
+  const now = nowIso();
+  return {
+    ...clone(value),
+    id: safeString(value.id) || createId("holding"),
+    portfolioId,
+    assetId,
+    assetType: normalizeImportedAssetType(value.assetType),
+    marketId,
+    name: safeString(value.name) || assetId,
+    symbol: safeString(value.symbol) || assetId,
+    quantity: finiteNumber(value.quantity),
+    averageCost: finiteNumber(value.averageCost),
+    currentPrice: finiteNumber(value.currentPrice),
+    targetWeight: finiteNumber(value.targetWeight),
+    sector: safeString(value.sector) || "Other",
+    createdAt: safeString(value.createdAt) || now,
+    updatedAt: safeString(value.updatedAt) || now,
+  };
+}
+
+function normalizeImportedCustomFund(value: unknown, index: number, marketId: MarketId): CustomFundRecord | null {
+  if (!isPlainRecord(value)) return null;
+  const id = safeString(value.id) || createId("custom-fund");
+  const now = nowIso();
+  const name = safeString(value.name) || `Imported Custom Fund ${index + 1}`;
+  const style = safeString(value.style) || "Custom";
+  const holdings = normalizeImportedCustomFundHoldings(value.holdings);
+  return {
+    ...clone(value),
+    id,
+    userId: BROWSER_USER_ID,
+    marketId,
+    name,
+    style,
+    holdings,
+    score: normalizeImportedCustomFundScore(value.score),
+    capital: nullableNumber(value.capital),
+    cashBalance: nullableNumber(value.cashBalance),
+    startDate: safeString(value.startDate) || null,
+    endDate: safeString(value.endDate) || null,
+    dcaPlans: isPlainRecord(value.dcaPlans) ? (clone(value.dcaPlans) as Record<string, PortfolioDcaPlan>) : {},
+    version: positiveInteger(value.version, 1),
+    versions: normalizeImportedCustomFundVersions(value.versions, holdings, name, style),
+    createdAt: safeString(value.createdAt) || now,
+    updatedAt: safeString(value.updatedAt) || now,
+  };
+}
+
+function normalizeImportedCustomFundHoldings(value: unknown): CustomFundHolding[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isPlainRecord)
+    .map((item) => ({
+      stockId: safeString(item.stockId),
+      weight: finiteNumber(item.weight),
+      ...(typeof item.locked === "boolean" ? { locked: item.locked } : {}),
+    }))
+    .filter((item) => item.stockId);
+}
+
+function normalizeImportedCustomFundVersions(
+  value: unknown,
+  fallbackHoldings: CustomFundHolding[],
+  fallbackName: string,
+  fallbackStyle: string,
+): CustomFundRecord["versions"] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isPlainRecord)
+    .map((item, index) => ({
+      version: positiveInteger(item.version, index + 1),
+      name: safeString(item.name) || `Imported version ${index + 1}`,
+      savedAt: safeString(item.savedAt) || nowIso(),
+      data: normalizeImportedCustomFundVersionData(item.data, fallbackHoldings, fallbackName, fallbackStyle),
+    }));
+}
+
+function normalizeImportedCustomFundVersionData(
+  value: unknown,
+  fallbackHoldings: CustomFundHolding[],
+  fallbackName: string,
+  fallbackStyle: string,
+): CustomFundRecord["versions"][number]["data"] {
+  const record: Record<string, unknown> = isPlainRecord(value) ? value : {};
+  const holdings = normalizeImportedCustomFundHoldings(record.holdings);
+  return {
+    name: safeString(record.name) || fallbackName,
+    style: safeString(record.style) || fallbackStyle,
+    holdings: holdings.length ? holdings : fallbackHoldings,
+    capital: nullableNumber(record.capital),
+    cashBalance: nullableNumber(record.cashBalance),
+    startDate: safeString(record.startDate) || null,
+    endDate: safeString(record.endDate) || null,
+    dcaPlans: isPlainRecord(record.dcaPlans) ? (clone(record.dcaPlans) as Record<string, PortfolioDcaPlan>) : {},
+  };
+}
+
+function normalizeImportedCustomFundScore(value: unknown): CustomFundScore {
+  const record = isPlainRecord(value) ? value : {};
+  return {
+    totalWeight: finiteNumber(record.totalWeight),
+    peRatio: finiteNumber(record.peRatio),
+    pbRatio: finiteNumber(record.pbRatio),
+    dividendYield: finiteNumber(record.dividendYield),
+    roe: finiteNumber(record.roe),
+    volatility: finiteNumber(record.volatility),
+    valueScore: finiteNumber(record.valueScore),
+    qualityScore: finiteNumber(record.qualityScore),
+    dividendScore: finiteNumber(record.dividendScore),
+    riskScore: finiteNumber(record.riskScore),
+    concentrationScore: finiteNumber(record.concentrationScore),
+    sectorExposure: normalizeExposure(value, "sectorExposure"),
+    backtestHistory: normalizeTimePoints(record.backtestHistory),
+    maxDrawdown: finiteNumber(record.maxDrawdown),
+  };
+}
+
+function normalizeExposure(value: unknown, key: string) {
+  if (!isPlainRecord(value) || !Array.isArray(value[key])) return [];
+  return value[key]
+    .filter(isPlainRecord)
+    .map((item) => ({ name: safeString(item.name) || "Other", weight: finiteNumber(item.weight) }));
+}
+
+function normalizeTimePoints(value: unknown): TimePoint[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isPlainRecord)
+    .map((item) => ({ date: safeString(item.date), value: finiteNumber(item.value) }))
+    .filter((item) => item.date);
+}
+
+function normalizeImportedAssetType(value: unknown): AssetType {
+  return value === "fund" || value === "stock" || value === "etf" || value === "customFund" || value === "customAsset" ? value : "stock";
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function safeString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function finiteNumber(value: unknown, fallback = 0): number {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function positiveInteger(value: unknown, fallback: number): number {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : fallback;
 }
 
 export function buildLocalJobsResponse(marketId?: MarketId): JobsResponse {

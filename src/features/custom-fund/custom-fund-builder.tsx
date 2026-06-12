@@ -9,7 +9,8 @@ import { useCalculationRun } from "@/hooks/use-calculation-run";
 import { useCustomFunds } from "@/hooks/use-custom-funds";
 import { useResolvedLanguage } from "@/hooks/use-language";
 import { assetDisplayName, assetKindLabel, assetPrimaryCategory, localizedAssetSector, quoteStatusLabel } from "@/lib/asset-display";
-import { apiErrorMessage } from "@/lib/api-client";
+import type { AssetDetailResponse } from "@/lib/api-contracts";
+import { apiErrorMessage, apiGet } from "@/lib/api-client";
 import { formatCurrency, formatNumber, formatOptionalCurrency, formatOptionalPercent, formatPercent } from "@/lib/formatters";
 import { t, type Language } from "@/lib/i18n";
 import { createReturnToState, locationToReturnTo } from "@/lib/navigation-state";
@@ -133,7 +134,7 @@ export function CustomFundBuilder({ marketId, language: languageProp = "en" }: {
 
     const fund = savedFunds.find((item) => item.id === fundId);
     if (!fund) return;
-    editFund(fund);
+    void editFund(fund);
   }
 
   function toggleAsset(asset: AssetRecord) {
@@ -271,15 +272,17 @@ export function CustomFundBuilder({ marketId, language: languageProp = "en" }: {
     setStatus(t(language, "custom.status.synced"));
   }
 
-  function editFund(fund: CustomFundRecord) {
+  async function editFund(fund: CustomFundRecord) {
     const restoredWeights = Object.fromEntries(fund.holdings.map((holding) => [holding.stockId, holding.weight]));
     const restoredCapital = Number(fund.capital ?? capital);
     const restoredAssets = Object.fromEntries(
       fund.holdings
-        .map((holding) => assetFromUniverse(universeById.get(holding.stockId), marketId))
-        .filter((asset): asset is AssetRecord => Boolean(asset))
+        .map((holding) => assetFromUniverse(universeById.get(holding.stockId), marketId) ?? placeholderAssetForHolding(holding, marketId))
         .map((asset) => [asset.id, asset]),
     ) as Record<string, AssetRecord>;
+    const missingAssetIds = fund.holdings
+      .map((holding) => holding.stockId)
+      .filter((stockId) => stockId && !universeById.has(stockId));
     setEditingId(fund.id);
     setDraft((current) => ({
       ...current,
@@ -296,6 +299,16 @@ export function CustomFundBuilder({ marketId, language: languageProp = "en" }: {
     setDcaPlans(ensureDcaPlansForAssets(fund.dcaPlans ?? {}, Object.values(restoredAssets), restoredCapital, restoredWeights));
     resetCalculation();
     setStatus(t(language, "custom.editing", { name: fund.name }));
+
+    if (!missingAssetIds.length) return;
+    const fetchedAssets = (await Promise.all(missingAssetIds.map((assetId) => fetchStockAsset(assetId, marketId)))).filter(
+      (asset): asset is AssetRecord => Boolean(asset),
+    );
+    if (!fetchedAssets.length) return;
+    setSelectedAssetMap((current) => ({
+      ...current,
+      ...Object.fromEntries(fetchedAssets.map((asset) => [asset.id, asset])),
+    }));
   }
 
   async function removeFund(id: string) {
@@ -718,6 +731,44 @@ function assetFromUniverse(asset: CustomFundUniverseItem | undefined, marketId: 
     updatedAt: new Date().toISOString(),
     dividendYield: asset.dividendYield,
   } as AssetRecord & { dividendYield?: number };
+}
+
+function placeholderAssetForHolding(holding: { stockId: string }, marketId: MarketId): AssetRecord {
+  const id = holding.stockId;
+  return {
+    id,
+    marketId,
+    assetType: "stock",
+    kind: "stock",
+    name: id,
+    symbol: id,
+    aliases: [id],
+    industry: "Other",
+    sector: "Other",
+    category: "Other",
+    latestPrice: null,
+    latestVolume: null,
+    dailyChange: null,
+    popularity: 0,
+    source: "saved-custom-fund",
+    quoteStatus: "missing",
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function fetchStockAsset(assetId: string, marketId: MarketId): Promise<AssetRecord | null> {
+  try {
+    const response = await apiGet<AssetDetailResponse>(`/api/assets/${encodeURIComponent(assetId)}`, {
+      market: marketId,
+      type: "stock",
+      refresh: false,
+    });
+    const asset = response.asset;
+    if (!asset || asset.marketId !== marketId || !isStockAsset(asset)) return null;
+    return asset;
+  } catch {
+    return null;
+  }
 }
 
 function mergeStockAsset(asset: AssetRecord | undefined, universeAsset: CustomFundUniverseItem | undefined, marketId: MarketId): AssetRecord | null {

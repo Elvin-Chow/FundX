@@ -1229,8 +1229,13 @@ function formatWeightValue(value: number) {
 }
 
 function isDisplayFixturePortfolio(portfolio: NonNullable<PortfolioResponse["portfolio"]>) {
-  const name = portfolio.name.trim().toLowerCase();
-  const goal = portfolio.goal.trim().toLowerCase();
+  const name = safeDisplayString(portfolio.name).toLowerCase();
+  const goal = safeDisplayString(portfolio.goal).toLowerCase();
   if (name.startsWith("smoke portfolio") || goal === "smoke coverage") return true;
-  return portfolio.holdings.some((holding) => holding.name.trim().toLowerCase().startsWith("smoke ") || holding.symbol.trim().toUpperCase().startsWith("SMK"));
+  const holdings = Array.isArray(portfolio.holdings) ? portfolio.holdings : [];
+  return holdings.some((holding) => safeDisplayString(holding.name).toLowerCase().startsWith("smoke ") || safeDisplayString(holding.symbol).toUpperCase().startsWith("SMK"));
+}
+
+function safeDisplayString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }

@@ -32,6 +32,30 @@ const requiredCollections = [
   "userPreferences",
   "auditEvents"
 ];
+const rawDbRequiredCollections = [
+  "users",
+  "securityMaster",
+  "funds",
+  "stocks",
+  "assets",
+  "dailyPrices",
+  "portfolios",
+  "portfolioVersions",
+  "transactions",
+  "cashMovements",
+  "watchlist",
+  "dcaPlans",
+  "customFunds",
+  "portfolioSnapshots",
+  "rebalanceSuggestions",
+  "insightRecommendations",
+  "reports",
+  "providerAccounts",
+  "activities",
+  "auditEvents",
+  "jobs",
+  "cache"
+];
 
 function parseArgs(argv) {
   const flags = new Set();
@@ -71,7 +95,7 @@ Usage:
   node scripts/db.mjs prune-backups
 
 Environment:
-  FUNDX_DB_FILE, FUNDX_DATA_DIR, FUNDX_BACKUP_DIR, FUNDX_LOG_DIR, FUNDX_SLOW_QUERY_MS
+  FUNDX_DB_PATH, FUNDX_DB_FILE, FUNDX_DATA_DIR, FUNDX_BACKUP_DIR, FUNDX_LOG_DIR, FUNDX_SLOW_QUERY_MS
 `);
 }
 
@@ -123,6 +147,13 @@ function validateDatabase(db) {
   if (!db || typeof db !== "object" || Array.isArray(db)) {
     return ["database must be a JSON object"];
   }
+  if (!db.data || typeof db.data !== "object" || Array.isArray(db.data)) {
+    if (!Number.isInteger(db.version) || db.version < 1) {
+      issues.push("version must be an integer >= 1");
+    }
+    validateCollections(db, rawDbRequiredCollections, issues);
+    return issues;
+  }
   if (db.kind !== CURRENT_KIND) {
     issues.push(`kind must be ${CURRENT_KIND}`);
   }
@@ -132,17 +163,24 @@ function validateDatabase(db) {
   if (!Array.isArray(db.migrations)) {
     issues.push("migrations must be an array");
   }
-  if (!db.data || typeof db.data !== "object" || Array.isArray(db.data)) {
-    issues.push("data must be an object");
-  } else {
-    for (const collection of requiredCollections) {
-      if (!Array.isArray(db.data[collection])) {
-        issues.push(`data.${collection} must be an array`);
-      }
-    }
-  }
+  validateCollections(db.data, requiredCollections, issues, "data.");
 
   return issues;
+}
+
+function validateCollections(data, collections, issues, prefix = "") {
+  for (const collection of collections) {
+    if (!Array.isArray(data[collection])) {
+      issues.push(`${prefix}${collection} must be an array`);
+    }
+  }
+}
+
+function databaseFormat(db) {
+  if (!db || typeof db !== "object" || Array.isArray(db)) {
+    return "invalid";
+  }
+  return db.data && typeof db.data === "object" && !Array.isArray(db.data) ? "wrapped migration DB" : "backend raw DB";
 }
 
 async function migrateDatabase(config, { createIfMissing = true, backupBeforeMigrate = true } = {}) {
@@ -224,6 +262,7 @@ async function createBackup(config, { label = "", silent = false } = {}) {
   });
 
   if (!silent) {
+    console.log(`Source DB: ${relativeToProject(config.dbFile)} (${config.dbFileSource})`);
     console.log(`Backup created: ${relativeToProject(backupFile)} (${formatBytes(statSync(backupFile).size)})`);
     console.log(`SHA256: ${sha}`);
   }
@@ -283,11 +322,21 @@ async function printStatus(config) {
 
   console.log("FundX DB status");
   console.log(`  DB file: ${relativeToProject(config.dbFile)} ${existsSync(config.dbFile) ? `(${formatBytes(statSync(config.dbFile).size)})` : "(missing)"}`);
+  console.log(`  DB source: ${config.dbFileSource}`);
   console.log(`  Backup dir: ${relativeToProject(config.backupDir)} (${backups.length} backup${backups.length === 1 ? "" : "s"})`);
 
   if (!db) {
     console.log("  Schema: not initialized");
     console.log(`  Pending migrations: ${migrations.map((migration) => migration.id).join(", ") || "none"}`);
+    return;
+  }
+
+  const format = databaseFormat(db);
+  console.log(`  Format: ${format}`);
+  if (format === "backend raw DB") {
+    console.log(`  Schema: v${db.version ?? "unknown"}`);
+    console.log(`  Collections: ${rawDbRequiredCollections.filter((collection) => Array.isArray(db[collection])).length}/${rawDbRequiredCollections.length}`);
+    console.log(`  Newest backup: ${backups[0] ? `${backups[0].file} (${backups[0].mtime.toISOString()})` : "none"}`);
     return;
   }
 
@@ -310,7 +359,7 @@ function verifyDatabase(config) {
     return;
   }
   const sha = fileSha256(config.dbFile);
-  console.log(`PASS DB verified: ${relativeToProject(config.dbFile)}`);
+  console.log(`PASS DB verified: ${relativeToProject(config.dbFile)} (${config.dbFileSource}, ${databaseFormat(db)})`);
   console.log(`SHA256: ${sha}`);
 }
 

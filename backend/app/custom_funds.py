@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -376,24 +377,23 @@ def calculate_sector_exposure(selected: list[dict[str, Any]]) -> list[dict[str, 
 
 
 def build_custom_fund_backtest(selected: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    base_history = price_history(selected[0]["stock"]) if selected else []
+    histories = [price_history_by_date(item["stock"]) for item in selected]
+    if not histories or any(not history for history in histories):
+        return []
+
+    common_dates = sorted(set.intersection(*(set(history.keys()) for history in histories)))
+    if not common_dates:
+        return []
+
+    bases = [history[common_dates[0]] for history in histories]
     history = []
-    for index, point in enumerate(base_history):
+    for date in common_dates:
         value = 0.0
-        for item in selected:
+        for item, stock_history, base in zip(selected, histories, bases):
             holding = item["holding"]
-            stock = item["stock"]
-            stock_history = price_history(stock)
-            base = history_value(stock_history[0]) if stock_history else number_or_zero(stock.get("price"))
-            current = (
-                history_value(stock_history[index])
-                if index < len(stock_history)
-                else history_value(stock_history[-1])
-                if stock_history
-                else number_or_zero(stock.get("price"))
-            )
+            current = stock_history[date]
             value += (number_or_zero(holding.get("weight")) / 100) * 100 * (1 if base == 0 else current / base)
-        history.append({"date": point.get("date"), "value": round_number(value, 2)})
+        history.append({"date": date, "value": round_number(value, 2)})
     return history
 
 
@@ -628,6 +628,19 @@ def record_audit(
 def price_history(stock: dict[str, Any]) -> list[dict[str, Any]]:
     history = stock.get("priceHistory")
     return history if isinstance(history, list) else []
+
+
+def price_history_by_date(stock: dict[str, Any]) -> dict[str, float]:
+    prices: dict[str, float] = {}
+    for point in price_history(stock):
+        if not isinstance(point, dict):
+            continue
+        date = str(point.get("date") or "")
+        value = point.get("value")
+        if not date or isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            continue
+        prices[date] = float(value)
+    return prices
 
 
 def history_value(point: Any) -> float:
