@@ -64,12 +64,12 @@ jobs:
           cat README.md >> "${readme_for_space}"
           mv "${readme_for_space}" README.md
 
-          git init
-          git checkout -b main
+          git init --initial-branch=main
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git lfs install
+          git lfs install --local
           git lfs track "seed/fundx-public-db.json"
+          git lfs track "*.png" "*.jpg" "*.jpeg" "*.webp" "*.gif" "*.ico"
           git add -A
           git commit -m "Sync FundX from GitHub ${GITHUB_SHA}"
 
