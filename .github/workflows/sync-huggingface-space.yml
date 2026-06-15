@@ -74,6 +74,26 @@ jobs:
           git commit -m "Sync FundX from GitHub ${GITHUB_SHA}"
 
           git remote add hf "https://Userzzjjjj:${HF_TOKEN}@huggingface.co/spaces/${HF_SPACE_REPO}"
-          git push --force hf main
 
-          echo "Synced clean snapshot to ${HF_SPACE_URL}"
+          push_log="${RUNNER_TEMP}/huggingface-push.log"
+          push_attempts=4
+          for attempt in $(seq 1 "${push_attempts}"); do
+            if git push --force hf main 2>&1 | tee "${push_log}"; then
+              echo "Synced clean snapshot to ${HF_SPACE_URL}"
+              exit 0
+            fi
+
+            if grep -q "returned error: 429" "${push_log}"; then
+              if [ "${attempt}" -lt "${push_attempts}" ]; then
+                sleep_seconds=$((attempt * attempt * 30))
+                echo "::warning::Hugging Face returned 429 on attempt ${attempt}; retrying in ${sleep_seconds}s."
+                sleep "${sleep_seconds}"
+                continue
+              fi
+
+              echo "::warning::Hugging Face still returned 429 after ${push_attempts} attempts. Vercel deployment is unaffected; rerun this workflow later to sync the Space."
+              exit 0
+            fi
+
+            exit 1
+          done
