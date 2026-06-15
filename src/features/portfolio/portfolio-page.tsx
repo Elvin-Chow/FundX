@@ -373,7 +373,7 @@ export function PortfolioPage({ market = "us", marketId, language: languageProp 
           <WorkbenchPanel
             title={t(language, "portfolio.fundPool")}
             subtitle={t(language, "portfolio.fundPoolSubtitle")}
-            className="flex min-h-[38rem] flex-col xl:h-[40rem]"
+            className="flex flex-col lg:min-h-[38rem] xl:h-[40rem]"
           >
             <input
               className={inputClassName}
@@ -486,7 +486,7 @@ export function PortfolioPage({ market = "us", marketId, language: languageProp 
           </WorkbenchPanel>
         }
         controls={
-          <WorkbenchPanel title={t(language, "portfolio.fundControls")} subtitle={t(language, "portfolio.fundDraftParameters")} className="flex min-h-[38rem] flex-col xl:h-[40rem]">
+          <WorkbenchPanel title={t(language, "portfolio.fundControls")} subtitle={t(language, "portfolio.fundDraftParameters")} className="flex flex-col lg:min-h-[38rem] xl:h-[40rem]">
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
               <FieldLabel label={t(language, "portfolio.savedPortfolios")}>
                 <div className="flex gap-2">
@@ -608,9 +608,9 @@ export function PortfolioPage({ market = "us", marketId, language: languageProp 
           </WorkbenchPanel>
         }
         actions={
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
             <div className="text-sm text-zinc-500">{t(language, "portfolio.selectedFundsSummary", { count: selectedAssets.length, weight: formatWeight(totalWeight) })}</div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
               <SecondaryButton onClick={resetDraft} disabled={calculation.running || savingDraft}>{t(language, "common.reset")}</SecondaryButton>
               <CalculateButton disabled={!weightValid} running={calculation.running} onClick={runCalculation}>
                 <span className="inline-flex items-center gap-2"><Calculator size={16} /> {t(language, "portfolio.calculate")}</span>

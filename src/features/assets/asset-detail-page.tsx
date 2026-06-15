@@ -1,8 +1,9 @@
 "use client";
 
-import { ArrowLeft, Loader2, RefreshCw, Star } from "lucide-react";
+import { ArrowLeft, Loader2, Star } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { RefreshIconButton } from "@/components/refresh-icon-button";
 import { useCalculationRun } from "@/hooks/use-calculation-run";
 import { useResolvedLanguage } from "@/hooks/use-language";
 import { apiErrorMessage, apiGet } from "@/lib/api-client";
@@ -81,6 +82,8 @@ export function AssetDetailPage({
   });
   const detailData = calculation.result ?? resource.data;
   const asset = detailData?.asset;
+  const refreshAssetId = asset?.id ?? assetId;
+  const refreshAssetType = asset?.assetType ?? assetType ?? "stock";
   const history = detailData?.history ?? [];
   const sortedHistory = sortValidHistory(history);
   const historyAutoRefreshReason = asset ? historyRefreshReason(sortedHistory, chartRange) : null;
@@ -114,13 +117,13 @@ export function AssetDetailPage({
     setStatus(t(language, "asset.refreshing"));
     void runCalculation({
       workflow: "asset-detail",
-      assets: [{ assetId, assetType: assetType ?? asset?.assetType ?? "stock" }],
+      assets: [{ assetId: refreshAssetId, assetType: refreshAssetType }],
       params: { range },
       refresh: true,
     }).then((response) => {
       if (response) setStatus(t(language, "asset.detailLoaded"));
     });
-  }, [asset?.assetType, assetId, assetType, chartRange, language, runCalculation]);
+  }, [chartRange, language, refreshAssetId, refreshAssetType, runCalculation]);
 
   useEffect(() => {
     if (!asset || !historyAutoRefreshReason || calculationRunning) return;
@@ -213,10 +216,7 @@ export function AssetDetailPage({
               <Star size={16} />
               {t(language, "discover.watch")}
             </button>
-            <button type="button" onClick={() => refreshPublicData()} className="inline-flex h-10 items-center gap-2 rounded bg-zinc-950 px-4 text-sm font-medium text-white hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200">
-              <RefreshCw size={16} className={calculationRunning ? "animate-spin" : undefined} />
-              {t(language, "common.refreshPublicData")}
-            </button>
+            <RefreshIconButton onClick={() => refreshPublicData()} loading={calculationRunning} label={t(language, "common.refreshPublicData")} />
           </div>
         }
       />

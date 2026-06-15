@@ -430,13 +430,13 @@ function DarkReportShell({
 }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-zinc-50 p-2 shadow-inner dark:border-zinc-900 dark:bg-[#020807] sm:p-3">
-      <article className="mx-auto w-full min-w-[560px] max-w-3xl rounded-lg border border-zinc-200 bg-white px-5 py-5 text-zinc-950 shadow-lg dark:border-zinc-500/70 dark:bg-[#0b1012] dark:text-zinc-100 dark:shadow-2xl">
-        <header className="flex items-start justify-between gap-4">
+      <article className="mx-auto w-full min-w-0 max-w-3xl rounded-lg border border-zinc-200 bg-white px-4 py-5 text-zinc-950 shadow-lg dark:border-zinc-500/70 dark:bg-[#0b1012] dark:text-zinc-100 dark:shadow-2xl sm:min-w-[560px] sm:px-5">
+        <header className="flex flex-col items-start justify-between gap-4 sm:flex-row">
           <div className="min-w-0">
             <div className="inline-flex rounded-full border border-teal-100 bg-teal-50 px-2.5 py-1 text-[11px] font-semibold text-teal-700 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-teal-200">FUNDX</div>
             <h2 className="mt-3 max-w-2xl break-words text-2xl font-semibold text-zinc-950 dark:text-white md:text-3xl">{title}</h2>
           </div>
-          <div className="w-40 shrink-0 rounded-lg border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-700 dark:bg-white/[0.04] dark:shadow-lg">
+          <div className="w-full shrink-0 rounded-lg border border-zinc-200 bg-white p-3 text-xs shadow-sm dark:border-zinc-700 dark:bg-white/[0.04] dark:shadow-lg sm:w-40">
             <div className="font-semibold text-zinc-950 dark:text-zinc-100">{t(language, "reports.generatedAt")}</div>
             <div className="mt-1.5 leading-5 text-zinc-600 dark:text-zinc-300">{generatedAt}</div>
           </div>

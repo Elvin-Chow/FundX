@@ -164,7 +164,7 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
           <WorkbenchPanel
             title={t(language, "insights.assetPool")}
             subtitle={t(language, "insights.assetPoolSubtitle", { total: formatNumber(totalAssets) })}
-            className="flex min-h-[38rem] flex-col xl:h-[42rem]"
+            className="flex flex-col lg:min-h-[38rem] xl:h-[42rem]"
           >
             <input
               className={inputClassName}
@@ -294,7 +294,7 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
           <WorkbenchPanel
             title={t(language, "insights.console")}
             subtitle={t(language, "insights.consoleSubtitle")}
-            className="flex min-h-[38rem] flex-col xl:h-[42rem]"
+            className="flex flex-col lg:min-h-[38rem] xl:h-[42rem]"
           >
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pr-1">
               <SelectedAssetList
@@ -362,11 +362,11 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
           </WorkbenchPanel>
         }
         actions={
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
             <div className="text-sm text-zinc-500 dark:text-zinc-400">
               {selectedAssets.length ? `${formatNumber(selectedAssets.length)} ${t(language, "insights.selectedAssets")}` : t(language, "insights.assetPool")}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
               <SecondaryButton onClick={resetWorkbench}>{t(language, "common.reset")}</SecondaryButton>
               <CalculateButton running={calculation.running} onClick={runInsights}>
                 <span className="inline-flex items-center gap-2"><Brain size={16} /> {analyzeLabel}</span>

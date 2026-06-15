@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { RefreshIconButton } from "@/components/refresh-icon-button";
 import { useCalculationRun } from "@/hooks/use-calculation-run";
 import { assetDisplayName, assetKindLabel, assetPrimaryCategory, quoteStatusLabel } from "@/lib/asset-display";
 import { formatNumber, formatOptionalPercent, formatPercent } from "@/lib/formatters";
@@ -109,18 +110,15 @@ export function CompareResultPage({
             <span className="inline-flex items-center gap-2"><ArrowLeft size={16} /> {t(language, "dca.back")}</span>
           </SecondaryButton>
           {requestedIds.length ? (
-            <button
-              type="button"
+            <RefreshIconButton
               disabled={calculation.running}
+              loading={calculation.running}
               onClick={() => {
                 setCache(null);
                 attemptedKey.current = "";
               }}
-              className="inline-flex h-10 items-center gap-2 rounded bg-zinc-950 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400"
-            >
-              <RefreshCw size={16} />
-              {t(language, "common.reload")}
-            </button>
+              label={t(language, "common.reload")}
+            />
           ) : null}
         </div>
         <div className="max-w-3xl">
@@ -191,7 +189,7 @@ function ResultMetricGrid({ metrics }: { metrics: Metric[] }) {
 function FundComparisonTable({ items, language }: { items: FundCompareItem[]; language: Language }) {
   return (
     <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-white/10 dark:bg-white/[0.03]">
-      <div className="max-h-[34rem] overflow-auto">
+      <div className="max-h-none overflow-auto sm:max-h-[34rem]">
         <table className="w-full min-w-[920px] text-sm">
           <thead className="sticky top-0 z-10 bg-zinc-50 text-xs uppercase text-zinc-500 shadow-[0_1px_0_rgba(228,228,231,1)] dark:bg-zinc-950 dark:text-zinc-400 dark:shadow-[0_1px_0_rgba(255,255,255,0.1)]">
             <tr>

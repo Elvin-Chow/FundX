@@ -150,7 +150,7 @@ export function ComparePage({
             <WorkbenchPanel
               title={t(language, "compare.fundUniverse")}
               subtitle={t(language, "compare.fundPoolSubtitle")}
-              className="flex min-h-[38rem] flex-col xl:h-[40rem]"
+              className="flex flex-col lg:min-h-[38rem] xl:h-[40rem]"
             >
               <input
                 className={inputClassName}
@@ -273,7 +273,7 @@ export function ComparePage({
             <WorkbenchPanel
               title={t(language, "compare.selectedFundPool")}
               subtitle={t(language, "compare.maxObjects", { count: selectedIds.length })}
-              className="flex min-h-[38rem] flex-col xl:h-[40rem]"
+              className="flex flex-col lg:min-h-[38rem] xl:h-[40rem]"
             >
               <div className="flex min-h-0 flex-1 flex-col pr-1">
                 <SelectedFundSlots entries={selectedEntries} language={language} onRemove={removeAsset} />
@@ -293,9 +293,9 @@ export function ComparePage({
             </WorkbenchPanel>
           }
           actions={
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
               <div className="text-sm text-zinc-500 dark:text-zinc-400">{t(language, "compare.selectedFundSummary", { count: selectedIds.length })}</div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
                 <SecondaryButton onClick={resetSelection} disabled={!selectedIds.length}>{t(language, "common.reset")}</SecondaryButton>
                 <CalculateButton disabled={!selectedIds.length} running={calculation.running} onClick={runCompare}>
                   <span className="inline-flex items-center gap-2"><Calculator size={16} /> {t(language, "compare.analyze")}</span>

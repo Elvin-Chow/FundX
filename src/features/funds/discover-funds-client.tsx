@@ -1,9 +1,10 @@
 "use client";
 
-import { RefreshCw, Star, X } from "lucide-react";
+import { Star, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { CustomSelect, type CustomSelectOption } from "@/components/custom-select";
+import { RefreshIconButton } from "@/components/refresh-icon-button";
 import { useResolvedLanguage } from "@/hooks/use-language";
 import { apiErrorMessage } from "@/lib/api-client";
 import { assetDisplayName, assetKindLabel, assetOriginalName, assetPrimaryCategory, localizedAssetSector, localizedFundCompany, marketCurrencyHint, quoteStatusLabel } from "@/lib/asset-display";
@@ -31,7 +32,7 @@ const sortOptions: Array<{ value: SearchSortKey; labelKey: string }> = [
 ];
 
 function assetHref(asset: AssetRecord, marketId: MarketId, language: Language) {
-  return `/assets/${asset.id}?market=${marketId}&type=${asset.assetType}&lang=${language}`;
+  return `/assets/${asset.id}?market=${asset.marketId ?? marketId}&type=${asset.assetType}&lang=${language}`;
 }
 
 function assetSubtitle(asset: AssetRecord, language: Language) {
@@ -155,15 +156,12 @@ export function DiscoverFundsClient({ marketId, language: languageProp = "en" }:
         title={t(language, "discover.search")}
         subtitle={t(language, "discover.searchSubtitle", { total: libraryStats.total, market: marketId.toUpperCase() })}
         action={
-          <button
-            type="button"
+          <RefreshIconButton
             onClick={refreshPublicData}
             disabled={search.reloading}
-            className="inline-flex h-10 items-center gap-2 rounded bg-zinc-950 px-4 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400"
-          >
-            <RefreshCw size={16} />
-            {t(language, "common.refreshPublicData")}
-          </button>
+            loading={search.reloading}
+            label={t(language, "common.refreshPublicData")}
+          />
         }
       >
         <div className="mb-4 grid gap-3 sm:grid-cols-3">
@@ -239,7 +237,7 @@ export function DiscoverFundsClient({ marketId, language: languageProp = "en" }:
               <div key={asset.id} className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-400/30 dark:bg-emerald-400/10">
                 <div className="text-sm font-semibold text-zinc-950 dark:text-white">{asset.symbol}</div>
                 <div className="mt-1 truncate text-sm text-zinc-600 dark:text-zinc-300">{assetDisplayName(asset, language)}</div>
-                <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
+                <div className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
                   <div>
                     <div className="text-xs text-zinc-500 dark:text-zinc-400">{t(language, "common.type")}</div>
                     <div className="font-semibold text-zinc-950 dark:text-white">{assetTypeLabel(language, asset.assetType)}</div>

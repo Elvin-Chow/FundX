@@ -37,7 +37,7 @@ export function Section({
   action,
   flushTop = false,
 }: {
-  title?: string;
+  title?: ReactNode;
   subtitle?: string;
   children: ReactNode;
   action?: ReactNode;

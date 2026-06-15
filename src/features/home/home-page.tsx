@@ -1,9 +1,9 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { CustomSelect } from "@/components/custom-select";
+import { RefreshIconButton } from "@/components/refresh-icon-button";
 import { useCustomFunds } from "@/hooks/use-custom-funds";
 import { useResolvedLanguage } from "@/hooks/use-language";
 import { apiGet } from "@/lib/api-client";
@@ -385,19 +385,20 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
         </Section>
       ) : null}
       <Section
-        title={t(language, "common.market")}
-        subtitle={topRefreshStatus}
-        action={
-          <button
-            type="button"
-            onClick={() => void refreshTopMarkets("force")}
-            disabled={refreshingMarketTops}
-            className="inline-flex h-10 items-center gap-2 rounded border border-zinc-200 bg-white px-4 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-200 dark:hover:bg-white/10 dark:disabled:text-zinc-500"
-          >
-            <RefreshCw size={16} className={refreshingMarketTops ? "animate-spin" : ""} />
-            {t(language, "common.reload")}
-          </button>
+        title={
+          <span className="inline-flex items-center gap-2">
+            <span>{t(language, "common.market")}</span>
+            <RefreshIconButton
+              onClick={() => void refreshTopMarkets("force")}
+              disabled={refreshingMarketTops}
+              loading={refreshingMarketTops}
+              label={t(language, "common.reload")}
+              iconSize={15}
+              className="h-7 w-7"
+            />
+          </span>
         }
+        subtitle={topRefreshStatus}
       >
         <div className={cn("grid gap-6 lg:grid-cols-2", refreshingMarketTops && "transition")}>
           <Section title={t(language, "home.topMarketStocks")}>
@@ -628,10 +629,11 @@ function assetTurnover(asset: AssetRecord) {
 }
 
 function assetDetailHref(asset: AssetRecord, marketId: MarketId, language: Language) {
-  const routeId = asset.assetType === "stock" && asset.id.startsWith(`market-top-${marketId}-`)
-    ? `${marketId}-${symbolRouteSlug(asset.symbol)}`
+  const assetMarketId = asset.marketId ?? marketId;
+  const routeId = asset.id.startsWith(`market-top-${assetMarketId}-`)
+    ? `${assetMarketId}-${symbolRouteSlug(asset.symbol)}`
     : asset.id;
-  return `/assets/${routeId}?market=${marketId}&type=${asset.assetType}&lang=${language}`;
+  return `/assets/${routeId}?market=${assetMarketId}&type=${asset.assetType}&lang=${language}`;
 }
 
 function symbolRouteSlug(symbol: string) {

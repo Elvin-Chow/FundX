@@ -333,7 +333,7 @@ export function CustomFundBuilder({ marketId, language: languageProp = "en" }: {
         <WorkbenchPanel
           title={t(language, "custom.stockUniverse")}
           subtitle={t(language, "custom.syncedStocks", { count: formatNumber(customFunds.data?.universeCount ?? stockSearch.data?.stats?.stocks ?? 0) })}
-          className="flex min-h-[38rem] flex-col xl:h-[40rem]"
+          className="flex flex-col lg:min-h-[38rem] xl:h-[40rem]"
         >
           <input
             className={inputClassName}
@@ -442,7 +442,7 @@ export function CustomFundBuilder({ marketId, language: languageProp = "en" }: {
         </WorkbenchPanel>
       }
       controls={
-        <WorkbenchPanel title={t(language, "custom.stockControls")} subtitle={t(language, "custom.stockControlsSubtitle")} className="flex min-h-[38rem] flex-col xl:h-[40rem]">
+        <WorkbenchPanel title={t(language, "custom.stockControls")} subtitle={t(language, "custom.stockControlsSubtitle")} className="flex flex-col lg:min-h-[38rem] xl:h-[40rem]">
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             <FieldLabel label={t(language, "custom.savedFunds")}>
               <div className="flex gap-2">
@@ -568,9 +568,9 @@ export function CustomFundBuilder({ marketId, language: languageProp = "en" }: {
         </WorkbenchPanel>
       }
       actions={
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
           <div className="text-sm text-zinc-500 dark:text-zinc-400">{t(language, "custom.selectedStocksSummary", { count: selectedAssets.length, weight: formatWeight(totalWeight) })}</div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
             <SecondaryButton onClick={resetDraft}>{t(language, "common.reset")}</SecondaryButton>
             <CalculateButton disabled={!weightValid} running={calculation.running} onClick={runCalculation}>
               <span className="inline-flex items-center gap-2"><Calculator size={16} /> {t(language, "portfolio.calculate")}</span>

@@ -1,9 +1,10 @@
 "use client";
 
-import { CheckSquare, Loader2, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { CheckSquare, Loader2, Plus, Search, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { CustomSelect } from "@/components/custom-select";
+import { RefreshIconButton } from "@/components/refresh-icon-button";
 import { useAssetsSearch } from "@/hooks/use-assets-search";
 import { useResolvedLanguage } from "@/hooks/use-language";
 import { useWatchlist } from "@/hooks/use-watchlist";
@@ -37,7 +38,7 @@ const autoRefreshInFlight = new Set<MarketId>();
 const watchlistRefreshMemory = new Map<MarketId, number>();
 
 function assetHref(asset: AssetRecord, marketId: MarketId, language: Language) {
-  return `/assets/${asset.id}?market=${marketId}&type=${asset.assetType}&lang=${language}`;
+  return `/assets/${asset.id}?market=${asset.marketId ?? marketId}&type=${asset.assetType}&lang=${language}`;
 }
 
 function rowAssetHref(item: { assetId: string; assetType: string }, marketId: MarketId, language: Language) {
@@ -270,15 +271,12 @@ export function WatchlistClient({ marketId, language: languageProp = "en" }: { m
               <CheckSquare size={16} />
               {managing ? t(language, "common.cancelEdit") : t(language, "watchlist.batchManage")}
             </button>
-            <button
-              type="button"
+            <RefreshIconButton
               onClick={() => void refreshQuotes()}
               disabled={!rows.length || refreshing || watchlist.reloading}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-300 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-200 dark:hover:bg-white/10 dark:disabled:text-zinc-500"
-            >
-              <RefreshCw size={16} className={refreshing || watchlist.reloading ? "animate-spin" : ""} />
-              {t(language, "common.reload")}
-            </button>
+              loading={refreshing || watchlist.reloading}
+              label={t(language, "common.reload")}
+            />
           </div>
         }
       >

@@ -12,8 +12,8 @@ export function AllocationDonut({ data, size = 176 }: AllocationDonutProps) {
   let offset = 0;
 
   return (
-    <div className="flex items-center gap-6">
-      <svg width={size} height={size} viewBox="0 0 42 42" className="-rotate-90">
+    <div className="flex min-w-0 flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-6">
+      <svg width={size} height={size} viewBox="0 0 42 42" className="-rotate-90 shrink-0">
         <circle cx="21" cy="21" r="15.915" fill="transparent" stroke="#f4f4f5" strokeWidth="5" />
         {data.map((slice, index) => {
           const dash = (slice.value / total) * 100;

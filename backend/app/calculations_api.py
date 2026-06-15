@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Request
 
-from .assets import asset_detail_payload, parse_asset_type
+from .assets import asset_detail_payload, parse_asset_type, resolve_any_asset
 from .auth import current_user_id
 from .custom_funds import market_stocks, score_custom_fund
 from .data_sources import refresh_market_data
@@ -106,7 +106,7 @@ async def run_calculation_route(request: Request) -> dict[str, Any]:
     user_id = current_user_id(request)
     db = read_db()
     assets = derive_assets_for_workflow(db, user_id, market_id, workflow, assets, params)
-    refresh_result = sync_selected_assets(user_id, market_id, assets, params) if refresh else no_refresh_result()
+    refresh_result = sync_selected_assets(db, user_id, market_id, assets, params) if refresh else no_refresh_result()
     db = read_db()
     warnings = warnings_from_refresh(refresh_result)
     result = build_calculation_result(db, user_id, market_id, workflow, assets, params, refresh_result)
@@ -191,8 +191,20 @@ def derive_assets_for_workflow(
     return []
 
 
-def sync_selected_assets(user_id: str, market_id: MarketId, assets: list[dict[str, str]], params: dict[str, Any]) -> dict[str, Any]:
-    public_asset_ids = list(dict.fromkeys(asset["assetId"] for asset in assets if asset["assetType"] in {"fund", "stock", "etf"}))
+def sync_selected_assets(
+    db: dict[str, Any],
+    user_id: str,
+    market_id: MarketId,
+    assets: list[dict[str, str]],
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    public_asset_ids = list(
+        dict.fromkeys(
+            canonical_public_asset_id(db, user_id, market_id, asset)
+            for asset in assets
+            if asset["assetType"] in {"fund", "stock", "etf"}
+        )
+    )
     if not public_asset_ids:
         return no_refresh_result()
     range_value, start_date, end_date = market_data_request_window(params)
@@ -207,6 +219,14 @@ def sync_selected_assets(user_id: str, market_id: MarketId, assets: list[dict[st
             "startDate": start_date,
             "endDate": end_date,
         }
+
+
+def canonical_public_asset_id(db: dict[str, Any], user_id: str, market_id: MarketId, asset: dict[str, str]) -> str:
+    try:
+        resolved = resolve_any_asset(db, user_id, market_id, asset["assetId"], parse_asset_type(asset.get("assetType")))
+    except FundXApiError:
+        return asset["assetId"]
+    return str(resolved.get("id") or asset["assetId"])
 
 
 def market_data_request_window(params: dict[str, Any]) -> tuple[str, str | None, str | None]:

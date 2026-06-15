@@ -12,10 +12,12 @@ from .services import (
     calculated_from_history,
     format_currency,
     format_percent,
+    get_cache_record,
     get_market_data_meta,
     is_public_market_asset,
     list_real_funds,
     list_real_stocks,
+    market_top_cache_payload,
     normalize_asset_record,
     number_or_zero,
     parse_market,
@@ -191,6 +193,10 @@ def resolve_any_asset(
         if asset:
             return asset
 
+    asset = resolve_market_top_asset(db, market_id, asset_id, asset_type)
+    if asset:
+        return register_market_top_asset(db, user_id, market_id, asset)
+
     if asset_type in (None, "customFund"):
         custom_fund = next(
             (
@@ -207,7 +213,7 @@ def resolve_any_asset(
 
 
 def symbol_slug_from_route_id(asset_id: str, market_id: str) -> str | None:
-    return market_top_symbol_slug(asset_id, market_id) or market_symbol_slug(asset_id, market_id)
+    return market_top_symbol_slug(asset_id, market_id) or market_symbol_slug(asset_id, market_id) or bare_symbol_slug(asset_id)
 
 
 def market_top_symbol_slug(asset_id: str, market_id: str) -> str | None:
@@ -227,8 +233,99 @@ def market_symbol_slug(asset_id: str, market_id: str) -> str | None:
     return asset_id[len(prefix):].strip().lower() or None
 
 
+def bare_symbol_slug(asset_id: str) -> str | None:
+    value = asset_id.strip()
+    if not re.fullmatch(r"[A-Za-z0-9./^-]+", value):
+        return None
+    return symbol_slug_for_asset(value) or None
+
+
 def symbol_slug_for_asset(symbol: Any) -> str:
     return re.sub(r"[^A-Z0-9]+", "-", str(symbol or "").upper()).strip("-").lower()
+
+
+def resolve_market_top_asset(
+    db: dict[str, Any],
+    market_id: str,
+    asset_id: str,
+    asset_type: str | None,
+) -> dict[str, Any] | None:
+    route_symbol_slug = symbol_slug_from_route_id(asset_id, market_id)
+    for kind in market_top_kinds_for_request(asset_id, market_id, asset_type):
+        for item in market_top_cache_items(db, market_id, kind):
+            if not isinstance(item, dict):
+                continue
+            if item.get("marketId") != market_id:
+                continue
+            if not asset_type_matches(str(item.get("assetType")), asset_type):
+                continue
+            if market_top_asset_matches(item, asset_id, route_symbol_slug):
+                return normalize_asset_record(item)
+    return None
+
+
+def market_top_kinds_for_request(asset_id: str, market_id: str, asset_type: str | None) -> tuple[str, ...]:
+    if asset_type == "stock":
+        return ("stock",)
+    if asset_type in ("fund", "etf"):
+        return ("fund",)
+    if asset_type in ("customFund", "customAsset"):
+        return ()
+
+    stock_prefix = f"market-top-{market_id}-stock-"
+    fund_prefix = f"market-top-{market_id}-fund-"
+    if asset_id.startswith(stock_prefix):
+        return ("stock",)
+    if asset_id.startswith(fund_prefix):
+        return ("fund",)
+    return ("stock", "fund")
+
+
+def market_top_cache_items(db: dict[str, Any], market_id: str, kind: str) -> list[Any]:
+    from .market_screeners import market_top_cache_key
+
+    cache_record = get_cache_record(db, market_top_cache_key(market_id, kind), include_expired=True)
+    payload = market_top_cache_payload(cache_record)
+    items = payload.get("items") if isinstance(payload, dict) else None
+    return items if isinstance(items, list) else []
+
+
+def market_top_asset_matches(asset: dict[str, Any], asset_id: str, route_symbol_slug: str | None) -> bool:
+    if str(asset.get("id") or "") == asset_id:
+        return True
+    return bool(route_symbol_slug and symbol_slug_for_asset(asset.get("symbol")) == route_symbol_slug)
+
+
+def register_market_top_asset(db: dict[str, Any], user_id: str, market_id: str, asset: dict[str, Any]) -> dict[str, Any]:
+    symbol = str(asset.get("symbol") or "").strip()
+    kind = "fund" if str(asset.get("kind") or asset.get("assetType")) in ("fund", "etf") else "stock"
+    if not symbol:
+        return asset
+
+    from .data_sources import market_top_item_to_discovered_asset
+
+    canonical = market_top_item_to_discovered_asset(asset, market_id, kind)
+    if canonical is None:
+        return asset
+
+    canonical = {
+        **canonical,
+        "id": f"{market_id}-{kind}-{symbol_slug_for_asset(symbol)}",
+    }
+
+    from .asset_discovery import canonicalize_assets, upsert_discovered_assets
+
+    canonical_assets = canonicalize_assets(db, [canonical])
+    persisted = canonical_assets[0] if canonical_assets else canonical
+    upsert_discovered_assets(
+        user_id=user_id,
+        market_id=market_id,
+        assets=canonical_assets or [canonical],
+        quotes=[],
+        cache_key=f"market-top-discovery:{user_id}:{market_id}:{kind}:{symbol_slug_for_asset(symbol)}:v1",
+        source="market-screener",
+    )
+    return normalize_asset_record(persisted)
 
 
 def asset_type_matches(actual: str, requested: str | None) -> bool:

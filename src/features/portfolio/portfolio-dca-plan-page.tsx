@@ -107,7 +107,7 @@ export function PortfolioDcaPlanPage({ marketId, language: languageProp = "en" }
       <WorkbenchLayout
         align="start"
         pool={
-          <WorkbenchPanel title={t(language, "portfolio.planSnapshot")} subtitle={t(language, "portfolio.dcaPlanSnapshotSubtitle")} className="flex min-h-[38rem] flex-col xl:h-[40rem]">
+          <WorkbenchPanel title={t(language, "portfolio.planSnapshot")} subtitle={t(language, "portfolio.dcaPlanSnapshotSubtitle")} className="flex flex-col lg:min-h-[38rem] xl:h-[40rem]">
             <div className="grid grid-cols-2 gap-x-5 gap-y-4 border-b border-zinc-100 pb-4 dark:border-white/10">
               <PreviewMetric label={t(language, "portfolio.selectedFunds")} value={formatNumber(assets.length)} />
               <PreviewMetric label={t(language, "portfolio.enabledDcaPlans")} value={formatNumber(summary.enabledCount)} />
@@ -146,7 +146,7 @@ export function PortfolioDcaPlanPage({ marketId, language: languageProp = "en" }
           <WorkbenchPanel
             title={t(language, "portfolio.dcaPlanDetails")}
             subtitle={t(language, "portfolio.dcaPlanDetailsSubtitle")}
-            className="flex min-h-[38rem] flex-col xl:h-[40rem]"
+            className="flex flex-col lg:min-h-[38rem] xl:h-[40rem]"
             action={
               <div className="flex gap-2">
                 <IconButton label={t(language, "portfolio.enableAllDca")} onClick={() => enableAll(true)}><Power size={15} /></IconButton>
@@ -172,7 +172,7 @@ export function PortfolioDcaPlanPage({ marketId, language: languageProp = "en" }
           </WorkbenchPanel>
         }
         actions={
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
             <div className="text-sm text-zinc-500 dark:text-zinc-400">
               {t(language, "portfolio.dcaPlanSummary", {
                 count: formatNumber(summary.enabledCount),
@@ -182,7 +182,7 @@ export function PortfolioDcaPlanPage({ marketId, language: languageProp = "en" }
             <button
               type="button"
               onClick={applyPlans}
-              className="inline-flex h-10 min-w-32 items-center justify-center gap-2 rounded bg-zinc-950 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+              className="inline-flex h-10 w-full min-w-32 items-center justify-center gap-2 rounded bg-zinc-950 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 sm:w-auto"
             >
               <Check size={16} />
               {t(language, "portfolio.applyDcaPlans")}

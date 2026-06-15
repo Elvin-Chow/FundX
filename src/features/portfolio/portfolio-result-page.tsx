@@ -332,7 +332,7 @@ function CompactDcaPlanPanel({
           {t(language, "portfolio.dcaEnabledShort", { count: formatNumber(enabledRows.length) })}
         </span>
       </div>
-      <div className="grid grid-cols-3 gap-2 rounded border border-white/80 bg-white/72 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+      <div className="grid grid-cols-1 gap-2 rounded border border-white/80 bg-white/72 p-3 dark:border-white/10 dark:bg-white/[0.04] sm:grid-cols-3">
         <DcaPlanMetric label={t(language, "portfolio.enabledDcaPlans")} value={formatNumber(enabledRows.length)} compact />
         <DcaPlanMetric label={t(language, "portfolio.totalInitialDca")} value={formatCurrency(totalInitial, marketId)} compact />
         <DcaPlanMetric label={t(language, "portfolio.totalRecurringDca")} value={formatCurrency(totalRecurring, marketId)} compact />
@@ -378,7 +378,7 @@ function DcaPlanDetailsModal({ rows, marketId, language, onClose }: { rows: DcaP
           </button>
         </div>
         <div className="min-h-0 overflow-y-auto p-3">
-          <div className="mb-3 grid grid-cols-3 gap-2 rounded border border-zinc-200 bg-zinc-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+          <div className="mb-3 grid grid-cols-1 gap-2 rounded border border-zinc-200 bg-zinc-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04] sm:grid-cols-3">
             <DcaPlanMetric label={t(language, "portfolio.enabledDcaPlans")} value={formatNumber(enabledRows.length)} compact />
             <DcaPlanMetric label={t(language, "portfolio.totalInitialDca")} value={formatCurrency(totalInitial, marketId)} compact />
             <DcaPlanMetric label={t(language, "portfolio.totalRecurringDca")} value={formatCurrency(totalRecurring, marketId)} compact />
@@ -491,7 +491,7 @@ function PortfolioPie({
       {slices.length ? (
         <>
           <div className="mt-4 flex flex-col items-center gap-4 sm:flex-row">
-            <div className="relative h-[190px] w-[190px] shrink-0">
+            <div className="relative h-[170px] w-[170px] shrink-0 sm:h-[190px] sm:w-[190px]">
               <svg viewBox="0 0 120 120" className="-rotate-90 drop-shadow-sm">
                 <circle cx="60" cy="60" r="42" fill="transparent" stroke="#e4e4e7" strokeWidth="12" />
                 {slices.map((slice, index) => {

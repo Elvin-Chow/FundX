@@ -1,8 +1,8 @@
 "use client";
 
-import { RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import { RefreshIconButton } from "@/components/refresh-icon-button";
 import { apiErrorMessage, apiGet, apiPost } from "@/lib/api-client";
 import type { AssetDetailResponse } from "@/lib/api-contracts";
 import { t, type Language } from "@/lib/i18n";
@@ -67,15 +67,13 @@ export function FundActionPanel({ marketId, fund, language = "en" }: FundActionP
         >
           {t(language, "fund.openDca")}
         </Link>
-        <button
-          type="button"
+        <RefreshIconButton
           disabled={pending}
           onClick={refreshPublicData}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded border border-zinc-200 px-4 text-sm font-medium text-zinc-950 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-300 dark:border-white/10 dark:text-zinc-200 dark:hover:bg-white/10 dark:hover:text-white dark:disabled:text-zinc-500 sm:col-span-2"
-        >
-          <RefreshCw size={16} />
-          {t(language, "common.refreshPublicData")}
-        </button>
+          loading={pending}
+          label={t(language, "common.refreshPublicData")}
+          className="justify-self-center sm:col-span-2"
+        />
       </div>
       <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{result}</p>
     </div>

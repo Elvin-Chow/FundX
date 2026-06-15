@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
@@ -323,6 +324,7 @@ def refresh_full_market_top_assets(
         "universe": FULL_MARKET_UNIVERSE,
         "ranking": MARKET_TOP_RANKING,
     }
+    sync_result = sync_market_top_items_to_assets(user_id=user_id, market_id=market_id, kind=kind, items=items)
 
     def mutate(next_db: dict[str, Any]) -> None:
         if items:
@@ -345,7 +347,77 @@ def refresh_full_market_top_assets(
         "ranking": MARKET_TOP_RANKING,
         "items": items,
         "updatedAt": updated_at,
+        "synced": sync_result.get("synced", 0),
     }
+
+
+def sync_market_top_items_to_assets(
+    *,
+    user_id: str = LOCAL_USER_ID,
+    market_id: MarketId,
+    kind: Literal["stock", "fund"],
+    items: list[Any],
+) -> dict[str, Any]:
+    assets = [
+        asset
+        for item in items
+        if isinstance(item, dict)
+        for asset in [market_top_item_to_discovered_asset(item, market_id, kind)]
+        if asset is not None
+    ]
+    if not assets:
+        return {"synced": 0, "quoted": 0, "source": "market-screener"}
+
+    from .asset_discovery import canonicalize_assets, upsert_discovered_assets
+
+    db = read_db()
+    canonical_assets = canonicalize_assets(db, assets)
+    return upsert_discovered_assets(
+        user_id=user_id,
+        market_id=market_id,
+        assets=canonical_assets,
+        quotes=[],
+        cache_key=f"market-top-discovery:{user_id}:{market_id}:{kind}:v1",
+        source="market-screener",
+    )
+
+
+def market_top_item_to_discovered_asset(item: dict[str, Any], market_id: MarketId, kind: Literal["stock", "fund"]) -> dict[str, Any] | None:
+    symbol = str(item.get("symbol") or "").strip().upper()
+    if not symbol or not is_syncable_market_top_item(item):
+        return None
+    canonical = {**item}
+    canonical["id"] = f"{market_id}-{kind}-{market_top_symbol_id_part(symbol)}"
+    canonical["marketId"] = market_id
+    canonical["assetType"] = "fund" if kind == "fund" else "stock"
+    canonical["kind"] = kind
+    canonical["source"] = canonical.get("source") or "market-screener"
+    canonical["symbol"] = symbol
+    canonical.setdefault("aliases", [symbol, symbol.lower(), str(item.get("name") or symbol)])
+    canonical.setdefault("dividends", [])
+    if kind == "fund":
+        canonical.setdefault("fundSubtype", item.get("fundSubtype") or "etf")
+        canonical.setdefault("fundType", item.get("fundType") or "ETF")
+    return canonical
+
+
+def market_top_symbol_id_part(symbol: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "-", symbol.upper()).strip("-").lower()
+
+
+def is_syncable_market_top_item(item: dict[str, Any]) -> bool:
+    has_provider_source = bool(str(item.get("sourceName") or "").strip() or str(item.get("quoteSource") or "").strip())
+    price = float_value(item.get("latestPrice"))
+    volume = float_value(item.get("latestVolume"))
+    return (
+        has_provider_source
+        and item.get("isTradable") is not False
+        and item.get("quoteStatus") == "fresh"
+        and price is not None
+        and price > 0
+        and volume is not None
+        and volume > 0
+    )
 
 
 def refresh_market_data(

@@ -205,7 +205,7 @@ export function DCASimulator({ marketId, fundId, language: languageProp = "en" }
         <WorkbenchPanel
           title={t(language, "dca.assetPool")}
           subtitle={t(language, "dca.assetPoolSubtitle")}
-          className="flex min-h-[38rem] flex-col xl:h-[40rem]"
+          className="flex flex-col lg:min-h-[38rem] xl:h-[40rem]"
         >
           <input
             className={inputClassName}
@@ -321,7 +321,7 @@ export function DCASimulator({ marketId, fundId, language: languageProp = "en" }
         </WorkbenchPanel>
       }
       controls={
-        <WorkbenchPanel title={t(language, "dca.planControls")} subtitle={editingId ? t(language, "dca.planEditing") : t(language, "dca.planDraftParameters")} className="flex min-h-[38rem] flex-col xl:h-[40rem]">
+        <WorkbenchPanel title={t(language, "dca.planControls")} subtitle={editingId ? t(language, "dca.planEditing") : t(language, "dca.planDraftParameters")} className="flex flex-col lg:min-h-[38rem] xl:h-[40rem]">
           <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             <SelectedAssetList
               assets={selectedAsset ? [selectedAsset] : []}
@@ -456,7 +456,7 @@ export function DCASimulator({ marketId, fundId, language: languageProp = "en" }
         </WorkbenchPanel>
       }
       actions={
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
           <div className="text-sm text-zinc-500 dark:text-zinc-400">{selectedAsset ? t(language, "dca.selectedAsset", { symbol: selectedAsset.symbol }) : t(language, "dca.noAssetSelected")}</div>
           <CalculateButton disabled={!selectedAsset} running={calculation.running} onClick={runCalculation}>{t(language, "dca.calculate")}</CalculateButton>
         </div>

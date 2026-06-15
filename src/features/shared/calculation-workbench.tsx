@@ -20,13 +20,13 @@ export function WorkbenchLayout({
   align?: "stretch" | "start";
 }) {
   return (
-    <div className="space-y-5">
-      <div className={`grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(24rem,1.05fr)] ${align === "start" ? "items-start" : "items-stretch"}`}>
+    <div className="fundx-workbench-layout min-w-0 space-y-5">
+      <div className={`fundx-workbench-grid grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(24rem,1.05fr)] ${align === "start" ? "items-start" : "items-stretch"}`}>
         <div className="min-w-0">{pool}</div>
         <div className="min-w-0">{controls}</div>
       </div>
       {results ? <div className="min-w-0">{results}</div> : null}
-      {actions ? <div className="sticky bottom-20 z-20 rounded-lg border border-zinc-200 bg-white/95 p-3 shadow-soft backdrop-blur dark:border-white/10 dark:bg-[#050706]/92 lg:bottom-4">{actions}</div> : null}
+      {actions ? <div className="fundx-workbench-actions sticky bottom-32 z-20 rounded-lg border border-zinc-200 bg-white/95 p-3 shadow-soft backdrop-blur dark:border-white/10 dark:bg-[#050706]/92 lg:bottom-4">{actions}</div> : null}
     </div>
   );
 }
@@ -45,13 +45,13 @@ export function WorkbenchPanel({
   className?: string;
 }) {
   return (
-    <section className={`rounded-lg border border-zinc-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.03] ${className ?? ""}`}>
-      <div className="mb-4 flex min-h-10 items-start justify-between gap-3">
+    <section className={`min-w-0 rounded-lg border border-zinc-200 bg-white p-4 dark:border-white/10 dark:bg-white/[0.03] ${className ?? ""}`}>
+      <div className="mb-4 flex min-h-10 flex-col items-start justify-between gap-3 sm:flex-row">
         <div className="min-w-0">
           <h2 className="text-base font-semibold tracking-tight text-zinc-950 dark:text-white">{title}</h2>
           {subtitle ? <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{subtitle}</p> : null}
         </div>
-        {action ? <div className="shrink-0">{action}</div> : null}
+        {action ? <div className="w-full shrink-0 sm:w-auto">{action}</div> : null}
       </div>
       {children}
     </section>
@@ -97,7 +97,7 @@ export function CalculateButton({
       type="button"
       onClick={onClick}
       disabled={disabled || running}
-      className="inline-flex h-10 min-w-32 items-center justify-center gap-2 rounded bg-zinc-950 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200"
+      className="inline-flex h-10 w-full min-w-32 items-center justify-center gap-2 rounded bg-zinc-950 px-4 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 sm:w-auto"
     >
       {running ? <Loader2 size={16} className="animate-spin" /> : null}
       {children}
@@ -144,7 +144,7 @@ export function SelectedAssetList({
   return (
     <div className="space-y-2">
       {assets.map((asset) => (
-        <div key={asset.id} className="flex min-h-14 items-center justify-between gap-3 rounded-lg border border-zinc-200 px-3 py-2 dark:border-white/10">
+        <div key={asset.id} className="flex min-h-14 min-w-0 items-center justify-between gap-3 rounded-lg border border-zinc-200 px-3 py-2 dark:border-white/10">
           <div className="min-w-0">
             <div className="truncate text-sm font-semibold text-zinc-950 dark:text-white">{assetDisplayName(asset, language)}</div>
             <div className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">
@@ -167,7 +167,7 @@ export function SelectedAssetList({
 
 export function FieldLabel({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="block">
+    <label className="block min-w-0">
       <span className="mb-1 block text-xs font-medium text-zinc-500 dark:text-zinc-400">{label}</span>
       {children}
     </label>

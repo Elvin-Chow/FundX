@@ -2,7 +2,8 @@
 
 import { useCallback } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ArrowLeft, RefreshCw } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
+import { RefreshIconButton } from "@/components/refresh-icon-button";
 import { useCalculationRun } from "@/hooks/use-calculation-run";
 import { apiGet } from "@/lib/api-client";
 import { formatOptionalCompactCurrency, formatOptionalPercent } from "@/lib/formatters";
@@ -96,8 +97,7 @@ export function FundDetailPage({ market = "us", marketId, fundId, language = "en
         title={fund.name}
         description={[fund.category, fund.style].filter(Boolean).join(" · ")}
         action={
-          <button
-            type="button"
+          <RefreshIconButton
             onClick={() => {
               void calculation.run({
                 workflow: "fund-detail",
@@ -107,11 +107,9 @@ export function FundDetailPage({ market = "us", marketId, fundId, language = "en
               }).then(() => resource.refresh("reload"));
             }}
             disabled={calculation.running}
-            className="inline-flex h-10 items-center gap-2 rounded bg-zinc-950 px-4 text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 dark:bg-white dark:text-zinc-950 dark:hover:bg-zinc-200 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400"
-          >
-            <RefreshCw size={16} className={calculation.running ? "animate-spin" : ""} />
-            {t(language, "common.refreshPublicData")}
-          </button>
+            loading={calculation.running}
+            label={t(language, "common.refreshPublicData")}
+          />
         }
       />
       {calculation.error || calculation.warnings.length ? (
@@ -134,13 +132,13 @@ export function FundDetailPage({ market = "us", marketId, fundId, language = "en
         {fund.holdings.length ? <Section title={t(language, "fund.topHoldings")}>
           <div className="divide-y divide-zinc-100 border border-zinc-200 bg-white dark:divide-white/10 dark:border-white/10 dark:bg-white/[0.03]">
             {fund.holdings.map((holding) => (
-              <div key={holding.symbol} className="grid grid-cols-[1fr_5rem_5rem] items-center gap-3 p-4 text-sm">
+              <div key={holding.symbol} className="grid gap-3 p-4 text-sm sm:grid-cols-[1fr_5rem_5rem] sm:items-center">
                 <div>
                   <div className="font-medium text-zinc-950 dark:text-white">{holding.name}</div>
                   <div className="mt-1 text-zinc-500 dark:text-zinc-400">{holding.symbol} · {holding.sector}</div>
                 </div>
-                <div className="text-right text-zinc-500 dark:text-zinc-400">{t(language, "custom.weight")}</div>
-                <div className="text-right font-semibold tabular-nums text-zinc-950 dark:text-white">{(holding.weight * 100).toFixed(1)}%</div>
+                <div className="text-zinc-500 dark:text-zinc-400 sm:text-right">{t(language, "custom.weight")}</div>
+                <div className="font-semibold tabular-nums text-zinc-950 dark:text-white sm:text-right">{(holding.weight * 100).toFixed(1)}%</div>
               </div>
             ))}
           </div>

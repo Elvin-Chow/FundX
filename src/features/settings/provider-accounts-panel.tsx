@@ -3,6 +3,7 @@
 import { Check, Eye, EyeOff, KeyRound, RefreshCw, Trash2 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { CustomSelect } from "@/components/custom-select";
+import { RefreshIconButton } from "@/components/refresh-icon-button";
 import { apiErrorMessage, apiGet } from "@/lib/api-client";
 import type { ProviderAccountProvider, ProviderAccountsResponse, ProviderAccountSummary } from "@/lib/api-contracts";
 import { t, type Language } from "@/lib/i18n";
@@ -100,15 +101,12 @@ export function ProviderAccountsPanel({ marketId, language }: ProviderAccountsPa
             <div className="text-xs font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">{t(language, "settings.providerAccountsEyebrow")}</div>
             <div className="mt-2 text-base font-semibold text-zinc-950 dark:text-white">{t(language, "settings.providerAccountsChain")}</div>
           </div>
-          <button
-            type="button"
+          <RefreshIconButton
             onClick={() => loadAccounts()}
             disabled={busy}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded border border-zinc-200 px-4 text-sm font-medium text-zinc-950 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:text-zinc-200 dark:hover:bg-white/10"
-          >
-            <RefreshCw size={16} />
-            {t(language, "common.reload")}
-          </button>
+            loading={busy}
+            label={t(language, "common.reload")}
+          />
         </div>
         <div className="divide-y divide-zinc-100 dark:divide-white/10">
           {accounts.map((account) => {

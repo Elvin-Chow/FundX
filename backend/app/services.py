@@ -566,6 +566,11 @@ def market_top_payload(
         items = list_market_top_assets(db, market_id, kind, limit, user_id, require_real_turnover=True)
         cached = True if items else cached
         source = "local-db"
+    if items and refresh_result is None and source != "local-db":
+        from .data_sources import sync_market_top_items_to_assets
+
+        sync_market_top_items_to_assets(user_id=user_id, market_id=market_id, kind=kind, items=items)
+        db = read_db()
     payload = {
         **get_market_data_meta(db, market_id, source=source, cache_key=cache_key, cached=cached),
         "kind": kind,

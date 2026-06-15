@@ -161,7 +161,7 @@ export function DCAResultPage({ marketId, language = "en" }: { marketId: MarketI
               {cashFlowEvents.length === 0 ? (
                 <StatusBanner title={t(language, "dca.noCashFlowEvents")} />
               ) : (
-              <div className="max-h-[34rem] overflow-auto">
+              <div className="max-h-none overflow-auto sm:max-h-[34rem]">
                 <table className="w-full min-w-[900px] text-sm">
                   <thead className="sticky top-0 z-10 bg-zinc-50 text-xs uppercase text-zinc-500 shadow-[0_1px_0_rgba(228,228,231,1)] dark:bg-zinc-950 dark:text-zinc-400 dark:shadow-[0_1px_0_rgba(255,255,255,0.1)]">
                     <tr>
