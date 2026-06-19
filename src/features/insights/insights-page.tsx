@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { Brain, CheckCircle2, ChevronDown, Filter, History, Plus, Save, SlidersHorizontal } from "lucide-react";
+import { Brain, CheckCircle2, ChevronDown, Database, ExternalLink, Filter, History, ListChecks, Plus, Save } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { CustomSelect } from "@/components/custom-select";
 import { useApiResource } from "@/hooks/use-api-resource";
@@ -29,6 +29,7 @@ import {
 import {
   savedRecommendationToInsightsResult,
   writeInsightsResultCache,
+  type InsightAnalysisMode,
   type InsightsResult,
   type RiskProfile,
   type SavedRecommendation,
@@ -45,6 +46,7 @@ const sortOptions: Array<{ value: SearchSortKey; labelKey: string }> = [
 
 const riskProfiles: RiskProfile[] = ["balanced", "conservative", "growth", "income"];
 const assetTypes: Array<"all" | "stock" | "fund"> = ["all", "stock", "fund"];
+const deepFirmQuantUrl = "https://deep-firm-quant.vercel.app/";
 
 export function InsightsPage({ market = "us", marketId, language = "en" }: { market?: Market; marketId?: Market; language?: Language }) {
   const activeMarket = normalizeMarket(marketId ?? market);
@@ -65,9 +67,11 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
   const [selectedAssetMap, setSelectedAssetMap] = useState<Record<string, AssetRecord>>({});
   const [riskProfile, setRiskProfile] = useState<RiskProfile>("balanced");
   const [simulationCount, setSimulationCount] = useState("12000");
-  const [includeSelectedAssets, setIncludeSelectedAssets] = useState(true);
+  const [analysisMode, setAnalysisMode] = useState<InsightAnalysisMode>("database");
   const [saveRecommendation, setSaveRecommendation] = useState(true);
   const selectedAssets = selectedIds.map((id) => selectedAssetMap[id]).filter(Boolean);
+  const includeSelectedAssets = analysisMode === "selected";
+  const selectedModeNeedsAssets = analysisMode === "selected" && selectedAssets.length === 0;
   const savedRows = savedResource.data?.recommendations ?? [];
   const assetResults = search.data?.items ?? [];
   const totalAssets = search.data?.filteredStats?.total ?? search.data?.stats?.total ?? search.data?.total ?? 0;
@@ -77,9 +81,18 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
   const fundTypeCounts = search.data?.facetCounts?.fundTypes ?? {};
 
   const analyzeLabel = useMemo(() => {
-    if (calculation.running) return t(language, "insights.analyzing");
+    if (calculation.running) return t(language, analysisMode === "selected" ? "insights.analyzingSelected" : "insights.analyzingDatabase");
     return t(language, "insights.analyze");
-  }, [calculation.running, language]);
+  }, [analysisMode, calculation.running, language]);
+
+  const statusIdleLabel = selectedModeNeedsAssets
+    ? t(language, "insights.selectedRequired")
+    : t(language, analysisMode === "selected" ? "insights.simulationReadySelected" : "insights.simulationReadyDatabase");
+  const actionSummaryLabel = analysisMode === "database"
+    ? t(language, "insights.databaseModeAction")
+    : selectedAssets.length
+      ? t(language, "insights.selectedModeCount", { count: formatNumber(selectedAssets.length) })
+      : t(language, "insights.selectedRequired");
 
   function toggleAsset(asset: AssetRecord) {
     setSelectedAssetMap((current) => ({ ...current, [asset.id]: asset }));
@@ -99,18 +112,25 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
   }
 
   async function runInsights() {
+    if (selectedModeNeedsAssets) {
+      calculation.reset();
+      return;
+    }
+    const assetsForAnalysis = includeSelectedAssets ? selectedAssets : [];
     const input = {
+      analysisMode,
       riskProfile,
       simulationCount: numericInput(simulationCount, 12000),
       includeSelectedAssets,
       saveRecommendation,
-      selectedAssets,
+      selectedAssets: assetsForAnalysis,
     };
     const response = await calculation.run({
       workflow: "insights",
-      assets: selectedAssets.map((asset) => ({ assetId: asset.id, assetType: asset.assetType })),
+      assets: assetsForAnalysis.map((asset) => ({ assetId: asset.id, assetType: asset.assetType })),
       params: {
-        scope: "database",
+        scope: analysisMode,
+        analysisMode,
         portfolioId: portfolio.activePortfolioId,
         riskProfile: input.riskProfile,
         simulationCount: input.simulationCount,
@@ -142,6 +162,7 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
       marketId: activeMarket,
       language,
       input: {
+        analysisMode: record.simulationSummary.analysisMode ?? (record.simulationSummary.includedAnchorCount ? "selected" : "database"),
         riskProfile: record.simulationSummary.riskProfile,
         simulationCount: record.simulationSummary.simulationCount,
         holdingsCount: record.simulationSummary.holdingsCount,
@@ -297,10 +318,19 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
             className="flex flex-col lg:min-h-[38rem] xl:h-[42rem]"
           >
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pr-1">
+              <AnalysisModeSelector
+                language={language}
+                value={analysisMode}
+                selectedCount={selectedAssets.length}
+                onChange={(nextMode) => {
+                  setAnalysisMode(nextMode);
+                  calculation.reset();
+                }}
+              />
               <SelectedAssetList
                 assets={selectedAssets}
                 language={language}
-                emptyLabel={t(language, "insights.selectedEmpty")}
+                emptyLabel={t(language, analysisMode === "selected" ? "insights.selectedModeEmpty" : "insights.selectedEmpty")}
                 onRemove={removeAsset}
               />
               <div className="mt-4 grid gap-3 md:grid-cols-2">
@@ -318,12 +348,6 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
               </div>
               <div className="mt-4 grid gap-2">
                 <ToggleRow
-                  checked={includeSelectedAssets}
-                  label={t(language, "insights.includeSelected")}
-                  icon={<SlidersHorizontal size={16} />}
-                  onChange={setIncludeSelectedAssets}
-                />
-                <ToggleRow
                   checked={saveRecommendation}
                   label={t(language, "insights.saveRecommendation")}
                   icon={<Save size={16} />}
@@ -336,6 +360,7 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
                 <PreviewMetric label={t(language, "insights.selectedAssets")} value={formatNumber(selectedAssets.length)} />
                 <PreviewMetric label={t(language, "insights.riskProfile")} value={t(language, `insights.profile.${riskProfile}`)} />
               </div>
+              <DeepFirmQuantPrompt language={language} />
               <div className="mt-5">
                 <SavedRecommendationList rows={savedRows} loading={savedResource.loading} language={language} onSelect={openSavedRecommendation} />
               </div>
@@ -346,7 +371,7 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
                 selectedCount={selectedAssets.length}
                 simulationCount={numericInput(simulationCount, 12000)}
                 riskProfileLabel={t(language, `insights.profile.${riskProfile}`)}
-                includeSelectedAssets={includeSelectedAssets}
+                analysisMode={analysisMode}
                 saveRecommendation={saveRecommendation}
               />
               <div className="pt-4">
@@ -354,8 +379,8 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
                   running={calculation.running}
                   error={calculation.error ?? savedResource.error}
                   warnings={calculation.warnings}
-                  idle={t(language, "insights.simulationReady")}
-                  runningLabel={t(language, "insights.analyzing")}
+                  idle={statusIdleLabel}
+                  runningLabel={t(language, analysisMode === "selected" ? "insights.analyzingSelected" : "insights.analyzingDatabase")}
                 />
               </div>
             </div>
@@ -364,17 +389,90 @@ export function InsightsPage({ market = "us", marketId, language = "en" }: { mar
         actions={
           <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
             <div className="text-sm text-zinc-500 dark:text-zinc-400">
-              {selectedAssets.length ? `${formatNumber(selectedAssets.length)} ${t(language, "insights.selectedAssets")}` : t(language, "insights.assetPool")}
+              {actionSummaryLabel}
             </div>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
               <SecondaryButton onClick={resetWorkbench}>{t(language, "common.reset")}</SecondaryButton>
-              <CalculateButton running={calculation.running} onClick={runInsights}>
+              <CalculateButton running={calculation.running} disabled={selectedModeNeedsAssets} onClick={runInsights}>
                 <span className="inline-flex items-center gap-2"><Brain size={16} /> {analyzeLabel}</span>
               </CalculateButton>
             </div>
           </div>
         }
       />
+    </div>
+  );
+}
+
+function AnalysisModeSelector({
+  language,
+  value,
+  selectedCount,
+  onChange,
+}: {
+  language: Language;
+  value: InsightAnalysisMode;
+  selectedCount: number;
+  onChange: (value: InsightAnalysisMode) => void;
+}) {
+  const options: Array<{ value: InsightAnalysisMode; label: string; description: string; icon: ReactNode }> = [
+    {
+      value: "database",
+      label: t(language, "insights.mode.database"),
+      description: t(language, "insights.mode.databaseDescription"),
+      icon: <Database size={16} />,
+    },
+    {
+      value: "selected",
+      label: t(language, "insights.mode.selected"),
+      description: t(language, "insights.mode.selectedDescription", { count: formatNumber(selectedCount) }),
+      icon: <ListChecks size={16} />,
+    },
+  ];
+
+  return (
+    <div className="mb-4">
+      <div className="mb-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">{t(language, "insights.analysisMode")}</div>
+      <div className="grid gap-2 rounded-lg border border-zinc-200 bg-zinc-50/70 p-1 dark:border-white/10 dark:bg-white/[0.04] sm:grid-cols-2">
+        {options.map((option) => {
+          const selected = option.value === value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onChange(option.value)}
+              className={`min-h-20 rounded px-3 py-2 text-left transition ${selected ? "bg-white shadow-sm ring-1 ring-emerald-300 dark:bg-white/[0.09] dark:ring-emerald-400/50" : "hover:bg-white/80 dark:hover:bg-white/[0.06]"}`}
+              aria-pressed={selected}
+            >
+              <span className="flex items-center gap-2 text-sm font-semibold text-zinc-950 dark:text-white">
+                <span className="text-emerald-600 dark:text-emerald-400">{option.icon}</span>
+                <span className="min-w-0 truncate">{option.label}</span>
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-zinc-500 dark:text-zinc-400">{option.description}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DeepFirmQuantPrompt({ language }: { language: Language }) {
+  return (
+    <div className="mt-4 flex flex-col gap-3 border-t border-zinc-100 pt-4 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <div className="text-sm font-semibold text-zinc-950 dark:text-white">{t(language, "insights.deepFirmTitle")}</div>
+        <p className="mt-1 text-xs leading-5 text-zinc-500 dark:text-zinc-400">{t(language, "insights.deepFirmBody")}</p>
+      </div>
+      <a
+        href={deepFirmQuantUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-800 transition hover:border-emerald-300 hover:text-emerald-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-200 dark:hover:border-emerald-400/40 dark:hover:text-emerald-300"
+      >
+        <ExternalLink size={15} />
+        <span>{t(language, "insights.deepFirmAction")}</span>
+      </a>
     </div>
   );
 }
@@ -393,7 +491,7 @@ function DecisionConsoleSnapshot({
   selectedCount,
   simulationCount,
   riskProfileLabel,
-  includeSelectedAssets,
+  analysisMode,
   saveRecommendation,
 }: {
   language: Language;
@@ -402,7 +500,7 @@ function DecisionConsoleSnapshot({
   selectedCount: number;
   simulationCount: number;
   riskProfileLabel: string;
-  includeSelectedAssets: boolean;
+  analysisMode: InsightAnalysisMode;
   saveRecommendation: boolean;
 }) {
   const rows = [
@@ -432,7 +530,7 @@ function DecisionConsoleSnapshot({
         ))}
       </div>
       <div className="mt-auto grid gap-2 pt-3 sm:grid-cols-2">
-        <SnapshotFlag label={t(language, "insights.includeSelected")} value={includeSelectedAssets ? t(language, "common.yes") : t(language, "common.no")} />
+        <SnapshotFlag label={t(language, "insights.analysisMode")} value={t(language, analysisMode === "selected" ? "insights.mode.selected" : "insights.mode.database")} />
         <SnapshotFlag label={t(language, "insights.saveRecommendation")} value={saveRecommendation ? t(language, "common.yes") : t(language, "common.no")} />
       </div>
     </div>

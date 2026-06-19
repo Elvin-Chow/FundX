@@ -2,6 +2,7 @@ import type { Language } from "@/lib/i18n";
 import type { AssetRecord, AssetType, MarketId, PortfolioSummary } from "@/lib/types";
 
 export type RiskProfile = "conservative" | "balanced" | "growth" | "income";
+export type InsightAnalysisMode = "database" | "selected";
 
 export type InsightAssetSummary = {
   id: string;
@@ -21,6 +22,8 @@ export type InsightAssetSummary = {
   qualityScore?: number | null;
   riskScore?: number | null;
   historyPoints?: number | null;
+  returnStartDate?: string | null;
+  returnEndDate?: string | null;
 };
 
 export type InsightHoldingRecommendation = {
@@ -54,19 +57,40 @@ export type InsightStrategy = {
     historyCoverage?: number;
     diversificationScore?: number;
     objectiveScore?: number;
+    historicalES?: number;
+    monteCarloES?: number;
+    sharpeRatio?: number;
+    averageCorrelation?: number;
+    historyObservations?: number;
+    historyBackedHoldingCount?: number;
+    returnStartDate?: string | null;
+    returnEndDate?: string | null;
     sectorExposure?: Array<{ name: string; weight: number }>;
     assetTypeExposure?: Array<{ name: string; weight: number }>;
   };
   explanations: string[];
   sourceSimulation?: number;
+  modelSource?: string;
+  riskModel?: {
+    status?: string;
+    source?: string;
+    version?: string;
+    optimizationUniverseCount?: number;
+    historyObservations?: number;
+  } | null;
 };
 
 export type SimulationSummary = {
+  analysisMode?: InsightAnalysisMode;
   simulationCount: number;
   completedSimulations: number;
   universeCount: number;
   candidatePoolSize: number;
+  simulationAssetCount?: number;
+  candidatePoolHistoryBackedCount?: number;
   historyBackedAssets: number;
+  returnStartDate?: string | null;
+  returnEndDate?: string | null;
   selectedAnchorCount: number;
   includedAnchorCount: number;
   riskProfile: RiskProfile;
@@ -78,6 +102,12 @@ export type SimulationSummary = {
     maxPosition?: number;
     sectorCount?: number;
     historyCoverageRatio?: number;
+  };
+  riskModel?: {
+    source?: string;
+    version?: string;
+    status?: string;
+    appliedStrategies?: number;
   };
   percentiles?: Record<string, { p10: number; p50: number; p90: number }>;
 };
@@ -109,6 +139,7 @@ export type InsightsResult = {
 };
 
 export type InsightsResultInput = {
+  analysisMode: InsightAnalysisMode;
   riskProfile: RiskProfile;
   simulationCount: number;
   holdingsCount?: number;

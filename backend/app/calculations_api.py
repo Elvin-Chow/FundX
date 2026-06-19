@@ -21,6 +21,9 @@ from .dca import (
 from .errors import FundXApiError, validation_error
 from .portfolio_read import build_portfolio_summary, get_active_portfolio
 from .reports_jobs_settings import build_report_payload
+from .risk_analysis_model import MODEL_SOURCE as RISK_ANALYSIS_MODEL_SOURCE
+from .risk_analysis_model import MODEL_VERSION as RISK_ANALYSIS_MODEL_VERSION
+from .risk_analysis_model import optimize_insight_candidates
 from .services import (
     MarketId,
     asset_kind,
@@ -545,7 +548,12 @@ def insights_result(
     assets: list[dict[str, str]],
     params: dict[str, Any],
 ) -> dict[str, Any]:
-    anchors = [resolve_selected_asset(db, user_id, market_id, asset) for asset in assets]
+    analysis_mode = insight_analysis_mode(params, assets)
+    active_assets = assets if analysis_mode == "selected" else []
+    if analysis_mode == "selected" and not active_assets:
+        raise validation_error("Select at least one asset before running selected-asset insights.")
+    normalized_params = {**params, "analysisMode": analysis_mode, "includeSelectedAssets": analysis_mode == "selected"}
+    anchors = [resolve_selected_asset(db, user_id, market_id, asset) for asset in active_assets]
     active_portfolio = get_active_portfolio(db, user_id, market_id, string_param(params, "portfolioId"))
     baseline_summary = (
         build_portfolio_summary(
@@ -558,7 +566,7 @@ def insights_result(
         else None
     )
     universe = build_insight_universe(db, user_id, market_id)
-    simulation = run_insight_recommendation_engine(universe, anchors, params)
+    simulation = run_insight_recommendation_engine(universe, anchors, normalized_params)
     insights = strategy_insights(simulation["strategies"])
     result = {
         "summary": baseline_summary,
@@ -571,11 +579,18 @@ def insights_result(
     }
     saved_record = None
     if bool_param(params, "saveRecommendation", True) and not browser_local_user_data_enabled():
-        saved_record = save_insight_recommendation(user_id, market_id, params, result)
+        saved_record = save_insight_recommendation(user_id, market_id, normalized_params, result)
         result["savedRecommendation"] = saved_record
     latest_db = read_db() if saved_record else db
     result["savedRecommendations"] = recent_insight_recommendations(latest_db, user_id, market_id, INSIGHT_RECOMMENDATION_LIMIT)
     return result
+
+
+def insight_analysis_mode(params: dict[str, Any], assets_or_anchors: list[dict[str, Any]]) -> str:
+    requested_mode = string_param(params, "analysisMode")
+    if requested_mode in {"database", "selected"}:
+        return requested_mode
+    return "selected" if bool_param(params, "includeSelectedAssets", True) and assets_or_anchors else "database"
 
 
 def build_insight_universe(db: dict[str, Any], user_id: str, market_id: MarketId) -> list[dict[str, Any]]:
@@ -612,6 +627,7 @@ def build_insight_universe(db: dict[str, Any], user_id: str, market_id: MarketId
                 "source": asset.get("source") or "local-db",
                 "updatedAt": asset.get("updatedAt"),
                 "metrics": metrics,
+                "history": history[-756:],
             }
         )
     return candidates
@@ -650,6 +666,7 @@ def candidate_history(
 
 def candidate_metrics(asset: dict[str, Any], record: dict[str, Any], history: list[dict[str, Any]], kind: str) -> dict[str, Any]:
     history_points = len(history)
+    history_start_date, history_end_date = history_date_range(history) if history_points >= INSIGHT_MIN_HISTORY_POINTS else (None, None)
     history_return = history_expected_return(history) if history_points >= INSIGHT_MIN_HISTORY_POINTS else None
     history_volatility = calculate_volatility(history) if history_points >= INSIGHT_MIN_HISTORY_POINTS else None
     history_drawdown = calculate_drawdown(history).get("maxDrawdown") if history_points >= INSIGHT_MIN_HISTORY_POINTS else None
@@ -693,6 +710,8 @@ def candidate_metrics(asset: dict[str, Any], record: dict[str, Any], history: li
         "riskScore": round_number(clamp_number(risk_score, 0, 100), 1),
         "liquidityScore": round_number(clamp_number(liquidity_score, 0, 100), 1),
         "historyPoints": history_points,
+        "historyStartDate": history_start_date,
+        "historyEndDate": history_end_date,
         "historyBacked": history_points >= INSIGHT_MIN_HISTORY_POINTS,
         "investableScore": round_number(investable_score, 1),
         "rankScore": round_number(rank_score, 2),
@@ -708,7 +727,10 @@ def run_insight_recommendation_engine(
         raise validation_error("At least three database assets are required before running portfolio recommendations.")
     simulation_count = bounded_int_param(params, "simulationCount", DEFAULT_INSIGHT_SIMULATIONS, 500, MAX_INSIGHT_SIMULATIONS)
     risk_profile = choice_param(params, "riskProfile", {"conservative", "balanced", "growth", "income"}, "balanced")
-    include_anchors = bool_param(params, "includeSelectedAssets", True)
+    analysis_mode = insight_analysis_mode(params, anchors)
+    if analysis_mode == "selected" and not anchors:
+        raise validation_error("Select at least one asset before running selected-asset insights.")
+    include_anchors = analysis_mode == "selected"
     candidate_pool = recommendation_candidate_pool(universe, anchors, risk_profile, INSIGHT_CANDIDATE_POOL_LIMIT)
     allocation_policy = insight_allocation_policy(candidate_pool, anchors, risk_profile, include_anchors)
     holdings_count = (
@@ -758,15 +780,28 @@ def run_insight_recommendation_engine(
                 score,
             )
 
+    for model_simulation in risk_model_candidate_simulations(candidate_pool, objectives, risk_profile, holdings_count, max_position):
+        objective_id = str(model_simulation.get("objectiveId"))
+        score = objective_score(model_simulation.get("metrics") or {}, objective_id)
+        add_top_simulation(top_by_objective[objective_id], model_simulation, score)
+
     strategies = select_recommendation_strategies(top_by_objective, objectives, universe, anchors, candidate_pool)
     if not strategies:
         raise validation_error("The recommendation engine could not build a valid simulated portfolio from the database assets.")
+    risk_model_strategy_count = sum(1 for strategy in strategies if (strategy.get("riskModel") or {}).get("status") == "applied")
+    pool_history_start_date, pool_history_end_date = candidate_history_date_range(candidate_pool)
+    history_backed_candidate_count = sum(1 for item in candidate_pool if item["metrics"].get("historyBacked"))
     summary = {
+        "analysisMode": analysis_mode,
         "simulationCount": simulation_count,
         "completedSimulations": len(distributions["expectedReturn"]),
         "universeCount": len(universe),
         "candidatePoolSize": len(candidate_pool),
+        "simulationAssetCount": len(candidate_pool),
+        "candidatePoolHistoryBackedCount": history_backed_candidate_count,
         "historyBackedAssets": sum(1 for item in universe if item["metrics"].get("historyBacked")),
+        "returnStartDate": pool_history_start_date,
+        "returnEndDate": pool_history_end_date,
         "selectedAnchorCount": len(anchors),
         "includedAnchorCount": len(anchor_candidates) if include_anchors else 0,
         "riskProfile": risk_profile,
@@ -774,11 +809,23 @@ def run_insight_recommendation_engine(
         "maxPosition": round_number(max_position, 1),
         "allocationPolicy": allocation_policy,
         "percentiles": {key: percentile_summary(values) for key, values in distributions.items()},
+        "riskModel": {
+            "source": RISK_ANALYSIS_MODEL_SOURCE,
+            "version": RISK_ANALYSIS_MODEL_VERSION,
+            "status": "applied" if risk_model_strategy_count else "fallback",
+            "appliedStrategies": risk_model_strategy_count,
+        },
     }
+    risk_model_methodology = (
+        f"Applied the {RISK_ANALYSIS_MODEL_SOURCE} non-ML risk model to history-backed candidates: Ledoit-Wolf covariance, Expected Shortfall, and long-only mean-variance optimization."
+        if risk_model_strategy_count
+        else f"Configured the {RISK_ANALYSIS_MODEL_SOURCE} non-ML risk model, but fell back to heuristic scoring because too few candidates had overlapping price history."
+    )
     methodology = [
         "Screened the full local database asset universe, excluding non-public or non-tradable records.",
         "Ranked candidates with history coverage, liquidity, valuation, quality, income, volatility, drawdown, and concentration penalties.",
         f"Ran {simulation_count:,} randomized portfolio trials with capped single-position weights and sector diversification checks.",
+        risk_model_methodology,
         "Selected different plans for risk control, balance, growth, or income instead of returning only the highest raw-return portfolio.",
     ]
     return {"summary": summary, "strategies": strategies, "methodology": methodology}
@@ -878,6 +925,83 @@ def recommendation_candidate_pool(
     return selected
 
 
+def risk_model_candidate_simulations(
+    candidate_pool: list[dict[str, Any]],
+    objectives: list[dict[str, str]],
+    risk_profile: str,
+    holdings_count: int,
+    max_position: float,
+) -> list[dict[str, Any]]:
+    simulations: list[dict[str, Any]] = []
+    history_candidates = [
+        candidate
+        for candidate in candidate_pool
+        if isinstance(candidate.get("history"), list) and len(candidate.get("history") or []) >= INSIGHT_MIN_HISTORY_POINTS
+    ]
+    if len(history_candidates) < 3:
+        return simulations
+
+    for objective in objectives:
+        objective_id = objective["id"]
+        ranked = sorted(history_candidates, key=lambda candidate: risk_model_candidate_score(candidate, objective_id), reverse=True)
+        model_pool_size = min(len(ranked), max(holdings_count * 4, 18))
+        optimization = optimize_insight_candidates(
+            ranked[:model_pool_size],
+            objective_id=objective_id,
+            risk_profile=risk_profile,
+            max_position_pct=max_position,
+            target_count=holdings_count,
+            min_history_points=INSIGHT_MIN_HISTORY_POINTS,
+        )
+        if not optimization or optimization.get("status") != "applied":
+            continue
+        selected = optimization["assets"]
+        weights = optimization["weights"]
+        heuristic_metrics = simulated_portfolio_metrics(selected, weights)
+        metrics = {
+            **heuristic_metrics,
+            **(optimization.get("metrics") or {}),
+            "objectiveScore": round_number(objective_score({**heuristic_metrics, **(optimization.get("metrics") or {})}, objective_id), 2),
+        }
+        simulations.append(
+            {
+                "assets": selected,
+                "weights": weights,
+                "metrics": metrics,
+                "objectiveId": objective_id,
+                "signature": portfolio_signature(selected),
+                "simulationIndex": 0,
+                "modelSource": RISK_ANALYSIS_MODEL_SOURCE,
+                "riskModel": {
+                    "status": "applied",
+                    "source": optimization.get("source"),
+                    "version": optimization.get("version"),
+                    "optimizationUniverseCount": optimization.get("optimizationUniverseCount"),
+                    "historyObservations": (optimization.get("metrics") or {}).get("historyObservations"),
+                },
+            }
+        )
+    return simulations
+
+
+def risk_model_candidate_score(candidate: dict[str, Any], objective_id: str) -> float:
+    metrics = candidate.get("metrics") or {}
+    base = number_or_zero(metrics.get("rankScore"))
+    expected = number_or_zero(metrics.get("expectedReturn"))
+    volatility = number_or_zero(metrics.get("volatility"))
+    drawdown = number_or_zero(metrics.get("maxDrawdown"))
+    dividend = number_or_zero(metrics.get("dividendYield"))
+    quality = number_or_zero(metrics.get("qualityScore"))
+    expense = number_or_zero(metrics.get("expenseRatio"))
+    if objective_id == "defensive":
+        return base + quality * 0.10 + drawdown * 0.40 - volatility * 0.55 + dividend * 0.35
+    if objective_id == "growth":
+        return base + expected * 0.90 + quality * 0.08 - volatility * 0.12
+    if objective_id == "income":
+        return base + dividend * 2.0 + quality * 0.06 - expense * 1.2 - volatility * 0.18
+    return base + expected * 0.35 + dividend * 0.35 + quality * 0.08 - volatility * 0.25
+
+
 def anchor_candidates_from_pool(candidate_pool: list[dict[str, Any]], anchors: list[dict[str, Any]]) -> list[dict[str, Any]]:
     anchor_ids = {str(anchor.get("id")) for anchor in anchors}
     return [candidate for candidate in candidate_pool if str(candidate.get("id")) in anchor_ids]
@@ -973,10 +1097,16 @@ def simulated_portfolio_metrics(selected: list[dict[str, Any]], weights: dict[st
     weighted = lambda key: sum(number_or_zero(candidate["metrics"].get(key)) * number_or_zero(weights.get(str(candidate.get("id")))) / 100 for candidate in selected)
     sector_weights: dict[str, float] = {}
     kind_weights: dict[str, float] = {}
+    history_metrics: list[dict[str, Any]] = []
     for candidate in selected:
         weight = number_or_zero(weights.get(str(candidate.get("id"))))
         sector_weights[str(candidate.get("sector") or "Other")] = sector_weights.get(str(candidate.get("sector") or "Other"), 0) + weight
         kind_weights[str(candidate.get("kind") or "asset")] = kind_weights.get(str(candidate.get("kind") or "asset"), 0) + weight
+        metrics = candidate.get("metrics") or {}
+        if metrics.get("historyBacked"):
+            history_metrics.append(metrics)
+    return_start_date = min((str(metrics.get("historyStartDate")) for metrics in history_metrics if metrics.get("historyStartDate")), default=None)
+    return_end_date = max((str(metrics.get("historyEndDate")) for metrics in history_metrics if metrics.get("historyEndDate")), default=None)
     top_weight = max((number_or_zero(weight) for weight in weights.values()), default=0)
     top_sector_weight = max(sector_weights.values(), default=0)
     sector_count = len([weight for weight in sector_weights.values() if weight > 1])
@@ -999,7 +1129,10 @@ def simulated_portfolio_metrics(selected: list[dict[str, Any]], weights: dict[st
         "topSectorWeight": round_number(top_sector_weight, 2),
         "sectorCount": sector_count,
         "holdingCount": len(selected),
+        "historyBackedHoldingCount": len(history_metrics),
         "historyCoverage": round_number(history_coverage, 2),
+        "returnStartDate": return_start_date,
+        "returnEndDate": return_end_date,
         "diversificationScore": round_number(diversification_score, 1),
         "sectorExposure": sorted(
             [{"name": name, "weight": round_number(weight, 2)} for name, weight in sector_weights.items()],
@@ -1078,7 +1211,10 @@ def select_recommendation_strategies(
     used_signatures: list[set[str]] = []
     for objective in objectives:
         chosen = None
-        for simulation in top_by_objective.get(objective["id"], []):
+        objective_simulations = top_by_objective.get(objective["id"], [])
+        model_simulations = [simulation for simulation in objective_simulations if (simulation.get("riskModel") or {}).get("status") == "applied"]
+        non_model_simulations = [simulation for simulation in objective_simulations if simulation not in model_simulations]
+        for simulation in [*model_simulations, *non_model_simulations]:
             signature = set(str(asset.get("id")) for asset in simulation.get("assets", []))
             if all(signature_overlap(signature, used) < 0.72 for used in used_signatures):
                 chosen = simulation
@@ -1139,6 +1275,11 @@ def build_strategy_payload(
         explanations.append(
             f"Selected assets: {', '.join(included) if included else 'none of the selected assets'} remained in this plan after full-database scoring."
         )
+    risk_model = simulation.get("riskModel") or {}
+    if risk_model.get("status") == "applied":
+        explanations.append(
+            f"Risk model source: {RISK_ANALYSIS_MODEL_SOURCE}; weights were refined with history-backed covariance and Expected Shortfall controls."
+        )
     return {
         "id": f"strategy-{objective['id']}-{index}",
         "objective": objective["id"],
@@ -1151,6 +1292,8 @@ def build_strategy_payload(
         "explanations": explanations,
         "sourceSimulation": simulation.get("simulationIndex"),
         "signature": simulation.get("signature"),
+        "modelSource": simulation.get("modelSource"),
+        "riskModel": risk_model if risk_model else None,
     }
 
 
@@ -1187,6 +1330,8 @@ def compact_candidate_asset(candidate: dict[str, Any]) -> dict[str, Any]:
         "qualityScore": metrics.get("qualityScore"),
         "riskScore": metrics.get("riskScore"),
         "historyPoints": metrics.get("historyPoints"),
+        "returnStartDate": metrics.get("historyStartDate"),
+        "returnEndDate": metrics.get("historyEndDate"),
     }
 
 
@@ -1241,7 +1386,7 @@ def default_insight_recommendation_title(params: dict[str, Any], timestamp: str)
 
 
 def compact_recommendation_params(params: dict[str, Any]) -> dict[str, Any]:
-    keys = ("riskProfile", "simulationCount", "holdingsCount", "maxPosition", "includeSelectedAssets", "portfolioId")
+    keys = ("analysisMode", "riskProfile", "simulationCount", "holdingsCount", "maxPosition", "includeSelectedAssets", "portfolioId")
     return {key: params.get(key) for key in keys if key in params}
 
 
@@ -1523,6 +1668,28 @@ def cumulative_return(history: list[dict[str, Any]]) -> float:
     if len(sorted_history) < 2:
         return 0
     return round_number(calculate_return(number_or_zero(sorted_history[0].get("value")), number_or_zero(sorted_history[-1].get("value"))), 2)
+
+
+def history_date_range(history: list[dict[str, Any]]) -> tuple[str | None, str | None]:
+    sorted_history = sort_history(history)
+    dates = [str(point.get("date")) for point in sorted_history if point.get("date")]
+    if not dates:
+        return None, None
+    return dates[0], dates[-1]
+
+
+def candidate_history_date_range(candidates: list[dict[str, Any]]) -> tuple[str | None, str | None]:
+    starts = [
+        str((candidate.get("metrics") or {}).get("historyStartDate"))
+        for candidate in candidates
+        if (candidate.get("metrics") or {}).get("historyStartDate")
+    ]
+    ends = [
+        str((candidate.get("metrics") or {}).get("historyEndDate"))
+        for candidate in candidates
+        if (candidate.get("metrics") or {}).get("historyEndDate")
+    ]
+    return (min(starts) if starts else None, max(ends) if ends else None)
 
 
 def history_expected_return(history: list[dict[str, Any]]) -> float | None:

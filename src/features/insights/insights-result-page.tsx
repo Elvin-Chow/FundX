@@ -45,6 +45,7 @@ export function InsightsResultPage({ marketId, language = "en" }: { marketId: Ma
   const topStrategy = strategies[0];
   const openStrategy = strategies.find((strategy) => strategy.id === openStrategyId) ?? null;
   const recommendedHoldingCount = topStrategy?.recommendedHoldings.length ?? summary.holdingsCount;
+  const candidatePoolSize = summary.simulationAssetCount ?? summary.candidatePoolSize;
 
   return (
     <div className="space-y-5">
@@ -55,10 +56,10 @@ export function InsightsResultPage({ marketId, language = "en" }: { marketId: Ma
         backHref={backHref}
       />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryMetric icon={<Database size={17} />} label={t(language, "insights.databaseAssets")} value={formatNumber(summary.universeCount)} detail={`${formatNumber(summary.candidatePoolSize)} ${t(language, "insights.shortlistedAssets")}`} />
-        <SummaryMetric icon={<BarChart3 size={17} />} label={t(language, "insights.simulationCount")} value={formatNumber(summary.completedSimulations)} detail={`${formatNumber(recommendedHoldingCount)} ${t(language, "insights.holdings")}`} />
+        <SummaryMetric icon={<Database size={17} />} label={t(language, "insights.databaseAssets")} value={formatNumber(summary.universeCount)} detail={t(language, "insights.summaryCandidatePool", { count: formatNumber(candidatePoolSize) })} />
+        <SummaryMetric icon={<BarChart3 size={17} />} label={t(language, "insights.simulationCount")} value={formatNumber(summary.completedSimulations)} detail={t(language, "insights.summaryActualHoldings", { count: formatNumber(recommendedHoldingCount) })} />
         <SummaryMetric icon={<ShieldCheck size={17} />} label={t(language, "insights.riskProfile")} value={t(language, `insights.profile.${summary.riskProfile}`)} detail={`${formatPlainPercent(summary.maxPosition)} ${t(language, "insights.maxPosition")}`} />
-        <SummaryMetric icon={<Layers size={17} />} label={t(language, "insights.historyBacked")} value={formatNumber(summary.historyBackedAssets)} detail={`${formatPlainPercent(summary.percentiles?.historyCoverage?.p50)} ${t(language, "insights.historyWeight")}`} />
+        <SummaryMetric icon={<Layers size={17} />} label={t(language, "insights.returnBasis")} value={t(language, "insights.annualizedEstimate")} detail={returnPeriodFromDates(summary.returnStartDate, summary.returnEndDate, language)} />
       </div>
 
       {topStrategy ? (
@@ -162,7 +163,7 @@ function StrategySnapshotCard({
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <SnapshotMetric label={t(language, "insights.expectedReturn")} value={formatSignedPercent(metrics.expectedReturn)} />
+        <SnapshotMetric label={t(language, "insights.expectedAnnualReturn")} value={formatSignedPercent(metrics.expectedReturn)} />
         <SnapshotMetric label={t(language, "insights.volatility")} value={formatPlainPercent(metrics.volatility)} />
         <SnapshotMetric label={t(language, "insights.maxDrawdown")} value={formatPlainPercent(metrics.maxDrawdown)} />
         <SnapshotMetric label={t(language, "insights.topHolding")} value={formatPlainPercent(metrics.topWeight)} />
@@ -284,10 +285,10 @@ function StrategyBody({
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <MiniMetric label={t(language, "insights.expectedReturn")} value={formatSignedPercent(metrics.expectedReturn)} />
-            <MiniMetric label={t(language, "insights.volatility")} value={formatPlainPercent(metrics.volatility)} />
-            <MiniMetric label={t(language, "insights.maxDrawdown")} value={formatPlainPercent(metrics.maxDrawdown)} />
-            <MiniMetric label={t(language, "insights.dividendYield")} value={formatPlainPercent(metrics.dividendYield)} />
+            <MiniMetric label={t(language, "insights.expectedAnnualReturn")} value={formatSignedPercent(metrics.expectedReturn)} detail={returnPeriodLabel(strategy, cache, language)} />
+            <MiniMetric label={t(language, "insights.volatility")} value={formatPlainPercent(metrics.volatility)} detail={t(language, "insights.annualizedMetric")} />
+            <MiniMetric label={t(language, "insights.maxDrawdown")} value={formatPlainPercent(metrics.maxDrawdown)} detail={t(language, "insights.drawdownMetric")} />
+            <MiniMetric label={t(language, "insights.dividendYield")} value={formatPlainPercent(metrics.dividendYield)} detail={t(language, "insights.currentEstimate")} />
           </div>
           <div className="mt-4 overflow-hidden rounded-lg border border-zinc-200 dark:border-white/10">
             <div className={`${tableGridClass} border-b border-zinc-100 bg-zinc-50 px-3 py-2 text-xs font-medium text-zinc-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-zinc-400`}>
@@ -318,6 +319,7 @@ function StrategyBody({
               ))}
             </div>
           </div>
+          <StrategyScopeCard strategy={strategy} cache={cache} holdings={holdings} language={language} />
         </div>
 
         <StrategyAnalysisRail
@@ -381,6 +383,45 @@ function StrategyAnalysisRail({
   );
 }
 
+function StrategyScopeCard({
+  strategy,
+  cache,
+  holdings,
+  language,
+}: {
+  strategy: InsightStrategy;
+  cache: InsightsResultCache;
+  holdings: InsightStrategy["recommendedHoldings"];
+  language: Language;
+}) {
+  const summary = cache.result.simulationSummary;
+  const metrics = strategy.metrics ?? {};
+  const candidatePoolSize = summary.simulationAssetCount ?? summary.candidatePoolSize;
+  const actualHoldingCount = metrics.holdingCount ?? holdings.length;
+  const rows = [
+    { label: t(language, "insights.scoredAssets"), value: formatNumber(summary.universeCount) },
+    { label: t(language, "insights.simulationCandidatePool"), value: formatNumber(candidatePoolSize) },
+    { label: t(language, "insights.actualHoldings"), value: formatNumber(actualHoldingCount) },
+    { label: t(language, "insights.returnPeriodShort"), value: returnPeriodLabel(strategy, cache, language) },
+  ];
+  return (
+    <div className="mt-3 rounded-lg border border-zinc-200 bg-zinc-50/70 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+      <div className="flex items-center gap-2 text-sm font-semibold text-zinc-950 dark:text-white">
+        <TrendingUp size={16} className="text-emerald-600" />
+        {t(language, "insights.simulationScope")}
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {rows.map((row) => (
+          <div key={row.label} className="min-w-0 rounded border border-white bg-white/80 px-3 py-2 text-sm dark:border-white/10 dark:bg-white/[0.04]">
+            <span className="text-zinc-500 dark:text-zinc-400">{row.label}</span>
+            <div className="mt-1 break-words font-semibold text-zinc-950 dark:text-white">{row.value}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const allocationColors = ["#10b981", "#0f172a", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6", "#64748b", "#d4d4d8"];
 
 function AllocationDonut({ title, segments }: { title: string; segments: Array<{ name: string; weight: number }> }) {
@@ -437,11 +478,12 @@ function allocationGradient(segments: Array<{ name: string; weight: number }>) {
   }).join(", ");
 }
 
-function MiniMetric({ label, value }: { label: string; value: string }) {
+function MiniMetric({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
     <div className="min-w-0 rounded border border-zinc-200 bg-white px-3 py-2 dark:border-white/10 dark:bg-white/[0.03]">
       <div className="text-xs font-medium leading-5 text-zinc-500 dark:text-zinc-400">{label}</div>
       <div className="mt-1 break-words text-sm font-semibold text-zinc-950 dark:text-white">{value}</div>
+      {detail ? <div className="mt-1 break-words text-xs leading-5 text-zinc-500 dark:text-zinc-400">{detail}</div> : null}
     </div>
   );
 }
@@ -473,7 +515,8 @@ function planReasons(strategy: InsightStrategy, cache: InsightsResultCache, lang
     t(language, `insights.planReason.objective.${strategy.objective}`),
     t(language, "insights.planReason.universe", {
       universe: formatNumber(summary.universeCount),
-      shortlist: formatNumber(summary.candidatePoolSize),
+      shortlist: formatNumber(summary.simulationAssetCount ?? summary.candidatePoolSize),
+      holdings: formatNumber(metrics.holdingCount ?? strategy.recommendedHoldings.length),
     }),
     t(language, "insights.planReason.holdingPolicy", {
       holdings: formatNumber(metrics.holdingCount ?? strategy.recommendedHoldings.length),
@@ -504,18 +547,46 @@ function methodologyItems(cache: InsightsResultCache, language: Language) {
   const summary = cache.result.simulationSummary;
   return [
     t(language, "insights.methodology.assets", { count: formatNumber(summary.universeCount) }),
-    t(language, "insights.methodology.simulation", { count: formatNumber(summary.completedSimulations) }),
+    t(language, summary.analysisMode === "selected" ? "insights.methodology.modeSelected" : "insights.methodology.modeDatabase", {
+      count: formatNumber(summary.includedAnchorCount ?? summary.selectedAnchorCount ?? 0),
+    }),
+    t(language, "insights.methodology.simulation", {
+      count: formatNumber(summary.completedSimulations),
+      pool: formatNumber(summary.simulationAssetCount ?? summary.candidatePoolSize),
+      holdings: formatNumber(summary.holdingsCount),
+    }),
+    summary.riskModel?.source && (summary.riskModel.appliedStrategies ?? 0) > 0 ? t(language, "insights.methodology.modelSource", { source: summary.riskModel.source }) : "",
     t(language, "insights.methodology.allocation", {
       holdings: formatNumber(summary.holdingsCount),
       maxPosition: formatPlainPercent(summary.maxPosition),
     }),
     t(language, "insights.methodology.logic"),
     t(language, "insights.methodology.storage"),
-  ];
+  ].filter(Boolean);
 }
 
 function holdingRole(kind: string | undefined, language: Language) {
   return t(language, kind === "fund" ? "assetType.fund" : "assetType.stock");
+}
+
+function returnPeriodLabel(strategy: InsightStrategy, cache: InsightsResultCache, language: Language) {
+  const metrics = strategy.metrics ?? {};
+  return returnPeriodFromDates(
+    metrics.returnStartDate ?? cache.result.simulationSummary.returnStartDate,
+    metrics.returnEndDate ?? cache.result.simulationSummary.returnEndDate,
+    language,
+  );
+}
+
+function returnPeriodFromDates(startDate: string | null | undefined, endDate: string | null | undefined, language: Language) {
+  if (!startDate || !endDate) return t(language, "insights.returnPeriodEstimated");
+  return t(language, "insights.returnPeriod", { start: formatIsoDate(startDate), end: formatIsoDate(endDate) });
+}
+
+function formatIsoDate(value: string) {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^\d{4}-\d{2}-\d{2}/);
+  return match ? match[0] : trimmed;
 }
 
 function formatPlainPercent(value: number | null | undefined, digits = 1) {
