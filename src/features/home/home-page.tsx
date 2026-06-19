@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Activity, Gauge, LineChart as LineChartIcon, PieChart, ShieldAlert, WalletCards, type LucideIcon } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { CustomSelect } from "@/components/custom-select";
 import { RefreshIconButton } from "@/components/refresh-icon-button";
@@ -14,11 +15,12 @@ import { formatCompactCurrency, formatCurrency, formatNumber, formatOptionalComp
 import { assetTypeLabel, getMarketCopy, t, type Language } from "@/lib/i18n";
 import { buildLocalPortfolioResponse } from "@/lib/local-user-data";
 import { createReturnToState, locationToReturnTo } from "@/lib/navigation-state";
-import type { AssetRecord, CustomFundRecord, CustomFundUniverseItem, DcaInput, Fund, MarketId, PortfolioDcaPlan, PortfolioSummary, TimePoint } from "@/lib/types";
+import type { AssetRecord, CustomFundRecord, CustomFundUniverseItem, DcaInput, Fund, MarketId, PortfolioDcaPlan, PortfolioSummary, TimePoint, TimeRange } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { normalizeMarket, type Market } from "../../components/types";
 import { readCustomFundResultCache } from "../custom-fund/custom-fund-result-store";
-import { AssetList, LoadingRows, PageHeader, Section, StatusBanner } from "../shared/feature-shell";
+import { AssetList, LoadingRows, PageHeader, Section, StatusBanner, ToneText } from "../shared/feature-shell";
+import { HomeValueChart } from "./home-value-chart";
 import { useApiResource } from "@/hooks/use-api-resource";
 
 type MarketTopsResponse = {
@@ -59,6 +61,20 @@ type CustomFundDisplayValue = {
   valueHistory?: TimePoint[];
   backtestReturn?: number | null;
   maxDrawdown?: number | null;
+};
+
+type DashboardMetric = {
+  label: string;
+  value: string;
+  delta?: string;
+  tone?: "positive" | "negative" | "neutral";
+  icon: LucideIcon;
+};
+
+type DashboardBar = {
+  label: string;
+  value: number;
+  detail?: string;
 };
 
 const autoTopRefreshInFlight = new Set<MarketId>();
@@ -341,6 +357,29 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
     delta: formatOptionalPercent(asset.dailyChange, 1, ""),
     tone: (asset.dailyChange ?? 0) >= 0 ? "positive" as const : "negative" as const,
   }));
+  const dashboardTitle = homeSelection?.kind === "customFund"
+    ? selectedCustomFund?.name ?? t(language, "custom.savedFunds")
+    : portfolio?.name ?? t(language, "portfolio.savedPortfolios");
+  const dashboardHistory = useMemo(
+    () => homeSelection?.kind === "customFund"
+      ? sanitizeTimePoints(customFundDisplay?.valueHistory ?? [])
+      : sanitizeTimePoints(summary?.valueHistory ?? []),
+    [customFundDisplay?.valueHistory, homeSelection?.kind, summary?.valueHistory],
+  );
+  const dashboardMetrics = useMemo(
+    () => buildDashboardMetrics(homeSelection, summary, selectedCustomFund, customFundDisplay, activeMarket, language),
+    [activeMarket, customFundDisplay, homeSelection, language, selectedCustomFund, summary],
+  );
+  const allocationBars = useMemo(
+    () => homeSelection?.kind === "customFund" && selectedCustomFund
+      ? buildCustomFundDashboardBars(selectedCustomFund, universeById, language)
+      : summary
+        ? buildPortfolioDashboardBars(summary, language)
+        : [],
+    [homeSelection?.kind, language, selectedCustomFund, summary, universeById],
+  );
+  const dashboardRange = homeSelection?.kind === "portfolio" ? summary?.range : undefined;
+  const showDashboard = dashboardMetrics.length > 0 || dashboardHistory.length > 0 || allocationBars.length > 0;
 
   return (
     <div>
@@ -384,6 +423,27 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
           <StatusBanner title={resource.error ?? customFunds.error ?? ""} body={t(language, "home.errorBody")} tone="neutral" />
         </Section>
       ) : null}
+      {resource.loading || customFunds.loading ? (
+        <Section>
+          <LoadingRows rows={4} />
+        </Section>
+      ) : showDashboard ? (
+        <HomeCommandCenter
+          title={dashboardTitle}
+          history={dashboardHistory}
+          defaultRange={dashboardRange}
+          metrics={dashboardMetrics}
+          allocationBars={allocationBars}
+          marketId={activeMarket}
+          language={language}
+        />
+      ) : (
+        <HomeLaunchPanel
+          title={portfolioOptions.length || customFundOptions.length ? t(language, "home.selectPortfolioTitle") : t(language, "home.noPortfolioTitle")}
+          body={(portfolioOptions.length || customFundOptions.length ? t(language, "home.selectPortfolioBody") : t(language, "home.noPortfolioBody")) || homeDashboardCopy(language, "emptyDeskBody")}
+          language={language}
+        />
+      )}
       <Section
         title={
           <span className="inline-flex items-center gap-2">
@@ -409,11 +469,6 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
           </Section>
         </div>
       </Section>
-      {resource.loading || customFunds.loading ? (
-        <Section>
-          <LoadingRows rows={4} />
-        </Section>
-      ) : null}
       {hasHomeDisplayData ? (
         <Section title={t(language, "home.topAssets")} subtitle={t(language, "home.topAssetsSubtitle")}>
           <AssetList assets={assets} />
@@ -422,6 +477,306 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
     </div>
   );
 }
+
+function HomeCommandCenter({
+  title,
+  history,
+  defaultRange,
+  metrics,
+  allocationBars,
+  marketId,
+  language,
+}: {
+  title: string;
+  history: TimePoint[];
+  defaultRange?: TimeRange;
+  metrics: DashboardMetric[];
+  allocationBars: DashboardBar[];
+  marketId: MarketId;
+  language: Language;
+}) {
+  return (
+    <section className="py-6">
+      {metrics.length ? (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {metrics.map((metric) => <DashboardMetricCard key={metric.label} metric={metric} />)}
+        </div>
+      ) : null}
+
+      <div className="mt-6 min-w-0 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-soft dark:border-white/10 dark:bg-white/[0.035]">
+        <div className="border-b border-zinc-100 px-5 py-4 dark:border-white/10">
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-600 dark:text-emerald-400">
+                <LineChartIcon size={14} />
+                <span>{homeDashboardCopy(language, "overview")}</span>
+              </div>
+              <h2 className="mt-2 truncate text-xl font-semibold tracking-tight text-zinc-950 dark:text-white">{title}</h2>
+            </div>
+            {history.length ? (
+              <div className="shrink-0 rounded border border-zinc-200 px-3 py-2 text-right dark:border-white/10">
+                <div className="text-[11px] uppercase tracking-[0.12em] text-zinc-500 dark:text-zinc-400">{homeDashboardCopy(language, "latestPoint")}</div>
+                <div className="mt-1 text-sm font-semibold tabular-nums text-zinc-950 dark:text-white">{formatCompactCurrency(history.at(-1)?.value ?? 0, marketId)}</div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <div className="grid min-w-0 gap-0 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="min-w-0 p-4 sm:p-5">
+            {history.length ? (
+              <HomeValueChart data={history} defaultRange={defaultRange} />
+            ) : (
+              <StatusBanner title={homeDashboardCopy(language, "noCurve")} body={homeDashboardCopy(language, "noCurveBody")} />
+            )}
+          </div>
+          <AllocationBreakdown title={homeDashboardCopy(language, "allocation")} bars={allocationBars} emptyText={homeDashboardCopy(language, "noAllocation")} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DashboardMetricCard({ metric }: { metric: DashboardMetric }) {
+  const Icon = metric.icon;
+
+  return (
+    <div className="min-w-0 rounded-lg border border-zinc-200 bg-white p-4 shadow-soft dark:border-white/10 dark:bg-white/[0.035]">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0 truncate text-sm font-medium text-zinc-500 dark:text-zinc-400">{metric.label}</div>
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-zinc-200 text-zinc-500 dark:border-white/10 dark:text-zinc-400">
+          <Icon size={16} />
+        </div>
+      </div>
+      <div className="mt-4 truncate text-2xl font-semibold tracking-tight text-zinc-950 dark:text-white">{metric.value}</div>
+      {metric.delta ? <ToneText tone={metric.tone} marketTone>{metric.delta}</ToneText> : null}
+    </div>
+  );
+}
+
+function AllocationBreakdown({ title, bars, emptyText }: { title: string; bars: DashboardBar[]; emptyText: string }) {
+  return (
+    <aside className="min-w-0 border-t border-zinc-100 p-5 dark:border-white/10 lg:border-l lg:border-t-0">
+      <div className="mb-4 flex items-center gap-2">
+        <PieChart size={17} className="text-zinc-500 dark:text-zinc-400" />
+        <h2 className="text-base font-semibold tracking-tight text-zinc-950 dark:text-white">{title}</h2>
+      </div>
+      {bars.length ? (
+        <div className="space-y-4">
+          {bars.map((bar, index) => (
+            <div key={`${bar.label}-${index}`} className="min-w-0">
+              <div className="flex min-w-0 items-center justify-between gap-3 text-sm">
+                <div className="min-w-0">
+                  <div className="truncate font-medium text-zinc-950 dark:text-white">{bar.label}</div>
+                  {bar.detail ? <div className="truncate text-xs text-zinc-500 dark:text-zinc-400">{bar.detail}</div> : null}
+                </div>
+                <div className="shrink-0 tabular-nums text-zinc-500 dark:text-zinc-400">{formatPlainPercent(bar.value)}</div>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-white/10">
+                <div
+                  className="h-full rounded-full bg-emerald-500"
+                  style={{ width: `${Math.min(100, Math.max(0, bar.value))}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-sm text-zinc-500 dark:text-zinc-400">{emptyText}</div>
+      )}
+    </aside>
+  );
+}
+
+function HomeLaunchPanel({
+  title,
+  body,
+  language,
+}: {
+  title: string;
+  body: string;
+  language: Language;
+}) {
+  return (
+    <section className="py-6">
+      <div className="rounded-lg border border-zinc-200 bg-zinc-950 p-5 text-white shadow-lift dark:border-white/10 dark:bg-white/[0.05]">
+        <div className="flex min-w-0 items-start gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded border border-white/15 bg-white/10">
+            <Gauge size={18} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-300">{homeDashboardCopy(language, "readyDesk")}</div>
+            <h2 className="mt-2 text-xl font-semibold tracking-tight">{title}</h2>
+            {body ? <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-300">{body}</p> : null}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function buildDashboardMetrics(
+  selection: HomeDisplaySelection | null,
+  summary: PortfolioSummary | undefined,
+  fund: CustomFundRecord | null,
+  display: CustomFundDisplayValue | null,
+  marketId: MarketId,
+  language: Language,
+): DashboardMetric[] {
+  if (selection?.kind === "customFund" && fund) {
+    const backtestReturn = display?.backtestReturn ?? customFundBacktestReturn(fund);
+    const drawdown = display?.maxDrawdown ?? fund.score.maxDrawdown;
+    return [
+      {
+        label: homeDashboardCopy(language, "dailyMove"),
+        value: formatOptionalPercent(display?.dailyChange, 1),
+        tone: toneFromSignedValue(display?.dailyChange),
+        icon: Activity,
+      },
+      {
+        label: homeDashboardCopy(language, "backtestReturn"),
+        value: formatPercent(backtestReturn, 1),
+        tone: toneFromSignedValue(backtestReturn),
+        icon: LineChartIcon,
+      },
+      {
+        label: t(language, "dca.maxDrawdown"),
+        value: formatPercent(drawdown, 1),
+        tone: "negative",
+        icon: ShieldAlert,
+      },
+      {
+        label: t(language, "asset.dividendYield"),
+        value: formatPlainPercent(fund.score.dividendYield),
+        tone: fund.score.dividendYield > 0 ? "positive" : "neutral",
+        icon: WalletCards,
+      },
+    ];
+  }
+
+  if (!summary) return [];
+  const rangeGain = summary.rangeGain ?? summary.totalGain;
+  const rangeGainPercent = summary.rangeGainPercent ?? summary.totalGainPercent;
+  return [
+    {
+      label: t(language, "common.totalGain"),
+      value: formatSignedCurrency(rangeGain, marketId),
+      delta: formatPercent(rangeGainPercent, 1),
+      tone: toneFromSignedValue(rangeGain),
+      icon: Activity,
+    },
+    {
+      label: t(language, "common.annualizedReturn"),
+      value: formatPercent(summary.annualizedReturn, 1),
+      tone: toneFromSignedValue(summary.annualizedReturn),
+      icon: LineChartIcon,
+    },
+    {
+      label: t(language, "dca.maxDrawdown"),
+      value: formatPercent(summary.maxDrawdown, 1),
+      tone: "negative",
+      icon: ShieldAlert,
+    },
+    {
+      label: homeDashboardCopy(language, "cash"),
+      value: formatCurrency(summary.cashBalance, marketId),
+      icon: WalletCards,
+    },
+  ];
+}
+
+function buildPortfolioDashboardBars(summary: PortfolioSummary, language: Language): DashboardBar[] {
+  const exposures = summary.assetTypeExposure.length ? summary.assetTypeExposure : summary.sectorExposure;
+  return exposures.slice(0, 5).map((exposure) => ({
+    label: dashboardExposureLabel(exposure.name, language),
+    value: normalizeWeightPercent(exposure.weight),
+    detail: summary.assetTypeExposure.length ? t(language, "portfolio.exposure") : homeDashboardCopy(language, "sectorExposure"),
+  }));
+}
+
+function buildCustomFundDashboardBars(
+  fund: CustomFundRecord,
+  universeById: Map<string, CustomFundUniverseItem>,
+  language: Language,
+): DashboardBar[] {
+  return [...fund.holdings]
+    .sort((left, right) => right.weight - left.weight)
+    .slice(0, 5)
+    .map((holding) => {
+      const asset = universeById.get(holding.stockId);
+      return {
+        label: asset?.symbol ?? holding.stockId,
+        value: normalizeWeightPercent(holding.weight),
+        detail: localizedAssetSector(asset?.sector ?? asset?.industry ?? asset?.category, language) || asset?.name,
+      };
+    });
+}
+
+function dashboardExposureLabel(value: string, language: Language) {
+  if (isAssetTypeValue(value)) return assetTypeLabel(language, value);
+  return localizedAssetSector(value, language) || value;
+}
+
+function isAssetTypeValue(value: string): value is AssetRecord["assetType"] {
+  return value === "stock" || value === "fund" || value === "etf" || value === "customFund" || value === "customAsset";
+}
+
+function toneFromSignedValue(value: number | null | undefined): "positive" | "negative" | "neutral" {
+  if (value == null) return "neutral";
+  return value >= 0 ? "positive" : "negative";
+}
+
+function formatPlainPercent(value: number | null | undefined, digits = 1) {
+  return value == null ? "—" : `${value.toFixed(digits)}%`;
+}
+
+function homeDashboardCopy(language: Language, key: keyof typeof homeDashboardCopyByLanguage.en) {
+  return homeDashboardCopyByLanguage[language]?.[key] ?? homeDashboardCopyByLanguage.en[key];
+}
+
+const homeDashboardCopyByLanguage = {
+  en: {
+    allocation: "Allocation map",
+    backtestReturn: "Backtest return",
+    cash: "Cash",
+    dailyMove: "Daily move",
+    emptyDeskBody: "Create or select a saved portfolio to unlock the value curve and allocation view.",
+    latestPoint: "Latest point",
+    noAllocation: "No allocation data yet.",
+    noCurve: "No value curve yet",
+    noCurveBody: "Save a portfolio result or custom fund calculation to unlock the home curve.",
+    overview: "Home overview",
+    readyDesk: "Home display pending",
+    sectorExposure: "Sector exposure",
+  },
+  "zh-CN": {
+    allocation: "配置地图",
+    backtestReturn: "回测收益",
+    cash: "现金",
+    dailyMove: "日内变动",
+    emptyDeskBody: "创建或选择一个已保存组合后，首页会展示资产曲线和配置视图。",
+    latestPoint: "最新点位",
+    noAllocation: "暂无配置数据。",
+    noCurve: "暂无资产曲线",
+    noCurveBody: "保存组合测算或自定义基金结果后，首页会展示曲线。",
+    overview: "首页概览",
+    readyDesk: "首页待选择",
+    sectorExposure: "行业敞口",
+  },
+  "zh-TW": {
+    allocation: "配置地圖",
+    backtestReturn: "回測收益",
+    cash: "現金",
+    dailyMove: "日內變動",
+    emptyDeskBody: "建立或選擇一個已儲存組合後，首頁會展示資產曲線和配置視圖。",
+    latestPoint: "最新點位",
+    noAllocation: "暫無配置資料。",
+    noCurve: "暫無資產曲線",
+    noCurveBody: "儲存組合測算或自訂基金結果後，首頁會展示曲線。",
+    overview: "首頁概覽",
+    readyDesk: "首頁待選擇",
+    sectorExposure: "產業曝險",
+  },
+} satisfies Record<Language, Record<string, string>>;
 
 function topStocksCacheKey(marketId: MarketId) {
   return `fundx-top-stocks-full-market-turnover-${marketId}`;
