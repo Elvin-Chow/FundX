@@ -21,6 +21,10 @@ PRIMARY_DB_PATH = REPO_ROOT / ".fundx" / "fundx-db.json"
 FALLBACK_DB_PATH = REPO_ROOT / "data" / "fundx.db.json"
 _DB_CACHE_SIGNATURE: tuple[str, int, int] | None = None
 _DB_CACHE_DATA: dict[str, Any] | None = None
+_MARKET_DATA_META_BASE_CACHE: dict[tuple[int, str], dict[str, Any]] = {}
+_ASSET_SEARCH_INDEX_CACHE: dict[tuple[int, str], dict[str, Any]] = {}
+_ASSET_SEARCH_RESULT_CACHE: dict[tuple[int, str, str], dict[str, Any]] = {}
+ASSET_SEARCH_RESULT_CACHE_LIMIT = 256
 
 US_SECTORS = [
     "Technology",
@@ -77,6 +81,7 @@ def read_db() -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
         raw = json.load(handle)
     normalized = normalize_db(raw)
+    clear_derived_caches()
     _DB_CACHE_SIGNATURE = signature
     _DB_CACHE_DATA = normalized
     return normalized
@@ -123,8 +128,15 @@ def db_file_signature(path: Path) -> tuple[str, int, int]:
 
 def set_db_cache(path: Path, data: dict[str, Any]) -> None:
     global _DB_CACHE_DATA, _DB_CACHE_SIGNATURE
+    clear_derived_caches()
     _DB_CACHE_SIGNATURE = db_file_signature(path)
     _DB_CACHE_DATA = data
+
+
+def clear_derived_caches() -> None:
+    _MARKET_DATA_META_BASE_CACHE.clear()
+    _ASSET_SEARCH_INDEX_CACHE.clear()
+    _ASSET_SEARCH_RESULT_CACHE.clear()
 
 
 def ensure_collections(db: dict[str, Any]) -> None:
@@ -566,11 +578,6 @@ def market_top_payload(
         items = list_market_top_assets(db, market_id, kind, limit, user_id, require_real_turnover=True)
         cached = True if items else cached
         source = "local-db"
-    if items and refresh_result is None and source != "local-db":
-        from .data_sources import sync_market_top_items_to_assets
-
-        sync_market_top_items_to_assets(user_id=user_id, market_id=market_id, kind=kind, items=items)
-        db = read_db()
     payload = {
         **get_market_data_meta(db, market_id, source=source, cache_key=cache_key, cached=cached),
         "kind": kind,
@@ -620,18 +627,23 @@ def asset_search_payload(params: dict[str, str], user_id: str = LOCAL_USER_ID) -
 
     discovery_result = discover_assets_for_search(input_data, user_id) if should_discover_assets(params) else None
     db = read_db()
-    assets = searchable_assets(db, user_id)
-    market_assets = [asset for asset in assets if asset.get("marketId") == market_id]
-    facet_assets = filter_assets_for_facets(market_assets, asset_types)
-    stats = search_stats(market_assets)
+    index = asset_search_index(db, user_id)
+    assets = index["assets"]
+    search_type_key = search_type if search_type in ("fund", "stock") else "all"
+    stats = index["stats"].get(market_id, {"total": 0, "funds": 0, "stocks": 0})
     cache_key = f"search:{user_id}:{json_stringify(input_data)}"
-    cached_result = get_cached_value(db, cache_key)
+    result_cache_key = (id(db), user_id, cache_key)
+    cached_result = _ASSET_SEARCH_RESULT_CACHE.get(result_cache_key)
+    if not isinstance(cached_result, dict):
+        cached_result = get_cached_value(db, cache_key)
     if isinstance(cached_result, dict):
         result = {**cached_result, "cached": True}
         if not isinstance(result.get("stats"), dict):
             result["stats"] = build_search_result(assets, input_data).get("stats")
     else:
-        result = {**build_search_result(assets, input_data), "cached": False}
+        built_result = build_search_result(assets, input_data)
+        set_asset_search_result_cache(result_cache_key, built_result)
+        result = {**built_result, "cached": False}
 
     payload = {
         **get_market_data_meta(db, market_id, cache_key=cache_key, cached=result["cached"]),
@@ -647,8 +659,8 @@ def asset_search_payload(params: dict[str, str], user_id: str = LOCAL_USER_ID) -
         "totalPages": result.get("totalPages", 1),
         "stats": stats,
         "filteredStats": result.get("stats", {"total": result.get("total", 0), "funds": 0, "stocks": 0}),
-        "facets": search_facets(facet_assets),
-        "facetCounts": search_facet_counts(facet_assets),
+        "facets": index["facets"].get((market_id, search_type_key), {"sectors": [], "industries": [], "fundTypes": []}),
+        "facetCounts": index["facetCounts"].get((market_id, search_type_key), {"sectors": {}, "industries": {}, "fundTypes": {}}),
     }
     if discovery_result is not None:
         payload["discovery"] = discovery_result
@@ -684,24 +696,32 @@ def get_market_data_meta(
     cache_key: str | None = None,
     cached: bool | None = None,
 ) -> dict[str, Any]:
-    assets = [
-        asset
-        for asset in db.get("assets", [])
-        if asset.get("marketId") == market_id
-        and asset.get("assetType") != "customAsset"
-        and not is_excluded_china_theme_asset(asset)
-    ]
-    timestamps = [db.get("updatedAt"), *(asset.get("updatedAt") for asset in assets)]
-    updated_at = max((timestamp for timestamp in timestamps if timestamp), default=db.get("updatedAt"))
-    latest_asset = max(assets, key=lambda asset: asset.get("updatedAt") or "", default=None)
+    base_cache_key = (id(db), market_id)
+    base = _MARKET_DATA_META_BASE_CACHE.get(base_cache_key)
+    if base is None:
+        assets = [
+            asset
+            for asset in db.get("assets", [])
+            if asset.get("marketId") == market_id
+            and asset.get("assetType") != "customAsset"
+            and not is_excluded_china_theme_asset(asset)
+        ]
+        timestamps = [db.get("updatedAt"), *(asset.get("updatedAt") for asset in assets)]
+        updated_at = max((timestamp for timestamp in timestamps if timestamp), default=db.get("updatedAt"))
+        latest_asset = max(assets, key=lambda asset: asset.get("updatedAt") or "", default=None)
+        base = {
+            "updatedAt": updated_at,
+            "source": (latest_asset or {}).get("source") or "local-db",
+        }
+        _MARKET_DATA_META_BASE_CACHE[base_cache_key] = base
     resolved_cache_key = cache_key or f"market-sync:{market_id}"
     cache_record = next((item for item in db.get("cache", []) if item.get("key") == resolved_cache_key), None)
     cache_fresh = bool(cache_record and str(cache_record.get("expiresAt", "")) > now_iso())
 
     return {
         "marketId": market_id,
-        "source": source or (latest_asset or {}).get("source") or "local-db",
-        "updatedAt": updated_at,
+        "source": source or base["source"],
+        "updatedAt": base["updatedAt"],
         "cache": {
             "cached": cached if cached is not None else cache_fresh,
             "key": resolved_cache_key,
@@ -856,6 +876,46 @@ def list_discover_funds(funds: list[dict[str, Any]], market_id: MarketId) -> lis
         }
         for fund in funds
     ]
+
+
+def asset_search_index(db: dict[str, Any], user_id: str = LOCAL_USER_ID) -> dict[str, Any]:
+    cache_key = (id(db), user_id)
+    cached = _ASSET_SEARCH_INDEX_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    assets = searchable_assets(db, user_id)
+    markets: dict[str, list[dict[str, Any]]] = {}
+    for asset in assets:
+        market_id = str(asset.get("marketId") or "")
+        if market_id:
+            markets.setdefault(market_id, []).append(asset)
+
+    stats: dict[str, dict[str, int]] = {}
+    facets: dict[tuple[str, str], dict[str, list[str]]] = {}
+    facet_counts: dict[tuple[str, str], dict[str, dict[str, int]]] = {}
+    for market_id, market_assets in markets.items():
+        stats[market_id] = search_stats(market_assets)
+        for type_key, asset_types in (("all", None), ("fund", ["fund"]), ("stock", ["stock"])):
+            typed_assets = filter_assets_for_facets(market_assets, asset_types)
+            facets[(market_id, type_key)] = search_facets(typed_assets)
+            facet_counts[(market_id, type_key)] = search_facet_counts(typed_assets)
+
+    index = {
+        "assets": assets,
+        "markets": markets,
+        "stats": stats,
+        "facets": facets,
+        "facetCounts": facet_counts,
+    }
+    _ASSET_SEARCH_INDEX_CACHE[cache_key] = index
+    return index
+
+
+def set_asset_search_result_cache(cache_key: tuple[int, str, str], result: dict[str, Any]) -> None:
+    if len(_ASSET_SEARCH_RESULT_CACHE) >= ASSET_SEARCH_RESULT_CACHE_LIMIT:
+        _ASSET_SEARCH_RESULT_CACHE.clear()
+    _ASSET_SEARCH_RESULT_CACHE[cache_key] = result
 
 
 def searchable_assets(db: dict[str, Any], user_id: str = LOCAL_USER_ID) -> list[dict[str, Any]]:
