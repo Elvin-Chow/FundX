@@ -156,8 +156,8 @@ export function StatusBanner({
   return (
     <div className={`rounded-lg border px-4 py-3 text-sm ${toneClass}`}>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <div className="font-medium">{title}</div>
+        <div className="min-w-0">
+          <div className="break-words font-medium">{title}</div>
           {body ? <div className="mt-1 text-current/80">{body}</div> : null}
         </div>
         {action ? <div className="shrink-0">{action}</div> : null}

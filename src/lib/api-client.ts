@@ -48,13 +48,22 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const contentType = response.headers.get("content-type") ?? "";
-  const data = contentType.includes("application/json") ? await response.json() : await response.text();
+  let data: unknown;
+  try {
+    data = contentType.includes("application/json") ? await response.json() : await response.text();
+  } catch {
+    throw new Error(response.ok ? "FundX received an unreadable API response. Please retry." : httpErrorMessage(response, null));
+  }
 
   if (!response.ok) {
     if (isApiErrorPayload(data)) {
       throw new FundXApiError(data, response.status);
     }
-    throw new Error(typeof data === "string" && data ? data : `FundX API request failed with ${response.status}.`);
+    throw new Error(httpErrorMessage(response, data));
+  }
+
+  if (!contentType.includes("application/json")) {
+    throw new Error(unexpectedContentMessage(response, data));
   }
 
   return data as T;
@@ -93,9 +102,9 @@ export function apiErrorMessage(error: unknown) {
     if (error.code === "market_forbidden") return "This market is not available for the current session.";
     if (error.code === "rate_limited") return "Too many requests. Please retry shortly.";
     if (error.code === "forbidden") return "This session is read-only.";
-    return error.message;
+    return safeErrorText(error.message) ?? "Unable to complete the request.";
   }
-  if (error instanceof Error) return error.message;
+  if (error instanceof Error) return safeErrorText(error.message) ?? "Unable to complete the request.";
   return "Unable to complete the request.";
 }
 
@@ -103,4 +112,38 @@ function isApiErrorPayload(value: unknown): value is ApiErrorPayload {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<ApiErrorPayload>;
   return candidate.ok === false && typeof candidate.error === "string" && typeof candidate.message === "string";
+}
+
+function httpErrorMessage(response: Response, data: unknown) {
+  const status = responseStatusLabel(response);
+  const text = safeErrorText(data);
+  if (text) return text;
+  if (response.status >= 500) return `FundX service is temporarily unavailable (${status}). Please retry shortly.`;
+  if (response.status === 404) return `FundX API endpoint was not found (${status}).`;
+  if (response.status === 401) return `FundX API request needs authentication (${status}).`;
+  if (response.status === 403) return `This session cannot access the requested FundX API resource (${status}).`;
+  return `FundX API request failed (${status}).`;
+}
+
+function unexpectedContentMessage(response: Response, data: unknown) {
+  const status = responseStatusLabel(response);
+  const text = safeErrorText(data);
+  if (text) return text;
+  return `FundX received an unexpected API response (${status}). Please retry.`;
+}
+
+function safeErrorText(value: unknown) {
+  if (typeof value !== "string") return null;
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text || looksLikeHtml(text)) return null;
+  return text.length > 300 ? `${text.slice(0, 297)}...` : text;
+}
+
+function looksLikeHtml(value: string) {
+  return /<!doctype\s+html/i.test(value) || /<\/?(html|head|body|script|style|main|div|p|h[1-6])[\s>]/i.test(value);
+}
+
+function responseStatusLabel(response: Response) {
+  const status = response.status ? `HTTP ${response.status}` : "network error";
+  return response.statusText ? `${status} ${response.statusText}` : status;
 }
