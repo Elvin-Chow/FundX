@@ -83,6 +83,7 @@ const autoTopRefreshInFlight = new Set<MarketId>();
 const topMarketRefreshMemory = new Map<MarketId, number>();
 const HOME_DISPLAY_QUOTE_STALE_MS = 12 * 60 * 60 * 1000;
 const HOME_DISPLAY_AUTO_REFRESH_DELAY_MS = 1200;
+const TOP_DISPLAY_STALE_MS = 12 * 60 * 60 * 1000;
 
 export function HomePage({ market = "us", marketId, language: languageProp = "en" }: { market?: Market; marketId?: Market; language?: Language }) {
   const activeMarket = normalizeMarket(marketId ?? market);
@@ -127,6 +128,7 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
   const liveTopFunds = useMemo(() => sanitizeTopAssetsResponse(marketTops.data?.marketId === activeMarket ? marketTops.data.funds : null), [activeMarket, marketTops.data]);
   const displayedTopStocks = useMemo(() => liveTopStocks ?? sanitizeTopAssetsResponse(cachedTopStocks), [cachedTopStocks, liveTopStocks]);
   const displayedTopFunds = useMemo(() => liveTopFunds ?? sanitizeTopAssetsResponse(cachedTopFunds), [cachedTopFunds, liveTopFunds]);
+  const topMarketDisplayStale = useMemo(() => topMarketDisplayNeedsRefresh(displayedTopStocks, displayedTopFunds), [displayedTopFunds, displayedTopStocks]);
   const data = resource.data;
   const portfolioOptions = data?.portfolios ?? [];
   const customFundOptions = useMemo(() => customFunds.data?.customFunds ?? [], [customFunds.data?.customFunds]);
@@ -216,9 +218,9 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
   }
 
   const refreshTopMarkets = useCallback(
-    async (mode: "auto" | "force" = "force") => {
+    async (mode: "auto" | "force" = "force", forceAuto = false) => {
       if (mode === "auto") {
-        if (!claimTopMarketAutoRefresh(activeMarket)) {
+        if (!claimTopMarketAutoRefresh(activeMarket, forceAuto)) {
           setTopRefreshStatus(topRefreshCopy(language, "cached"));
           return;
         }
@@ -354,7 +356,7 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
 
   useEffect(() => {
     if (marketTops.loading || marketTops.reloading || topRefreshInFlight) return;
-    const waitMs = msUntilTopMarketAutoRefresh(activeMarket);
+    const waitMs = topMarketDisplayStale ? 0 : msUntilTopMarketAutoRefresh(activeMarket);
     if (waitMs > 0) {
       setTopRefreshStatus(topRefreshCopy(language, liveTopStocks && liveTopFunds ? "cached" : "ready"));
       const timeout = window.setTimeout(() => setTopAutoRefreshTick((current) => current + 1), waitMs);
@@ -364,13 +366,13 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
       setTopRefreshStatus(topRefreshCopy(language, liveTopStocks && liveTopFunds ? "cached" : "ready"));
       return;
     }
-    if (shouldAutoRefreshTopMarkets(activeMarket)) {
-      const timeout = window.setTimeout(() => void refreshTopMarkets("auto"), TOP_AUTO_REFRESH_DELAY_MS);
+    if (shouldAutoRefreshTopMarkets(activeMarket) || topMarketDisplayStale) {
+      const timeout = window.setTimeout(() => void refreshTopMarkets("auto", topMarketDisplayStale), TOP_AUTO_REFRESH_DELAY_MS);
       return () => window.clearTimeout(timeout);
     }
     setTopRefreshStatus(topRefreshCopy(language, liveTopStocks && liveTopFunds ? "cached" : "ready"));
     return;
-  }, [activeMarket, language, liveTopFunds, liveTopStocks, marketTops.loading, marketTops.reloading, refreshTopMarkets, topAutoRefreshTick, topRefreshInFlight]);
+  }, [activeMarket, language, liveTopFunds, liveTopStocks, marketTops.loading, marketTops.reloading, refreshTopMarkets, topAutoRefreshTick, topMarketDisplayStale, topRefreshInFlight]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -998,8 +1000,8 @@ function msUntilTopMarketAutoRefresh(marketId: MarketId) {
   return elapsed > TOP_CACHE_MAX_AGE_MS ? 0 : TOP_CACHE_MAX_AGE_MS - elapsed + 1;
 }
 
-function claimTopMarketAutoRefresh(marketId: MarketId) {
-  if (!shouldAutoRefreshTopMarkets(marketId) || autoTopRefreshInFlight.has(marketId)) return false;
+function claimTopMarketAutoRefresh(marketId: MarketId, force = false) {
+  if ((!force && !shouldAutoRefreshTopMarkets(marketId)) || autoTopRefreshInFlight.has(marketId)) return false;
   autoTopRefreshInFlight.add(marketId);
   return true;
 }
@@ -1056,6 +1058,22 @@ function markTopAssetsAsCached(payload: MarketTopResponse): MarketTopResponse {
 function didTopMarketResponseRefreshSucceed(response: MarketTopResponse) {
   if (response.refreshSkipped === "recent") return Boolean(sanitizeTopAssetsResponse(response));
   return response.refreshed === true && Boolean(sanitizeTopAssetsResponse(response));
+}
+
+function topMarketDisplayNeedsRefresh(stocks: MarketTopResponse | null, funds: MarketTopResponse | null) {
+  return topMarketResponseNeedsRefresh(stocks) || topMarketResponseNeedsRefresh(funds);
+}
+
+function topMarketResponseNeedsRefresh(response: MarketTopResponse | null) {
+  if (!response?.items.length) return true;
+  const timestamps = [
+    response.updatedAt,
+    ...response.items.flatMap((asset) => [asset.quoteFetchedAt, asset.sourceAsOf, asset.updatedAt]),
+  ]
+    .map((value) => (value ? Date.parse(value) : NaN))
+    .filter(Number.isFinite);
+  if (!timestamps.length) return true;
+  return Date.now() - Math.max(...timestamps) > TOP_DISPLAY_STALE_MS;
 }
 
 function isRealTopAsset(asset: AssetRecord) {
@@ -1248,20 +1266,22 @@ function buildCustomFundDisplayValue(
   quoteById: Map<string, HomeAssetQuote>,
   universeById: Map<string, CustomFundUniverseItem>,
 ): CustomFundDisplayValue {
+  const estimate = buildCustomFundValueEstimate(fund, quoteById, universeById);
   if (resultSummary) {
     const valueHistory = sanitizeTimePoints(resultSummary.valueHistory);
+    const estimateValueHistory = sanitizeTimePoints(estimate.valueHistory);
+    const liveValue = latestHistoryValue(estimateValueHistory);
     return {
-      value: resultSummary.totalValue,
-      dailyChange: historyDailyChange(valueHistory),
-      pricedCount: resultSummary.holdings.length,
-      updatedAt: fund.updatedAt,
-      valueHistory,
+      value: liveValue ?? resultSummary.totalValue,
+      dailyChange: estimateValueHistory.length ? historyDailyChange(estimateValueHistory) : historyDailyChange(valueHistory),
+      pricedCount: estimate.pricedCount || resultSummary.holdings.length,
+      updatedAt: estimate.updatedAt || fund.updatedAt,
+      valueHistory: estimateValueHistory.length ? estimateValueHistory : valueHistory,
       backtestReturn: calculateCumulativeReturn(valueHistory),
       maxDrawdown: calculateDrawdown(valueHistory).maxDrawdown,
     };
   }
 
-  const estimate = buildCustomFundValueEstimate(fund, quoteById, universeById);
   if (estimate.valueHistory.length) {
     return {
       value: latestHistoryValue(estimate.valueHistory),
