@@ -430,6 +430,7 @@ def refresh_market_data(
     timeout_seconds: float = 8,
     start_date: str | None = None,
     end_date: str | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
     if not asset_ids:
         raise ValueError("refresh_market_data requires explicit asset_ids; full-market quote refresh is disabled.")
@@ -459,7 +460,7 @@ def refresh_market_data(
 
     for asset in candidates:
         asset_id = str(asset.get("id"))
-        if asset_refresh_cache_hit(db, market_id, asset_id, range_value, start_date, end_date):
+        if not force and asset_refresh_cache_hit(db, market_id, asset_id, range_value, start_date, end_date):
             cached.append({"assetId": asset_id, "reason": "Recent asset refresh cache hit."})
             continue
         try:
@@ -479,7 +480,7 @@ def refresh_market_data(
         set_cached_value(
             next_db,
             f"market-sync:{market_id}",
-            {"fetched": len(fetched), "cached": cached, "failed": failed, "at": now_iso(), "source": source, "range": range_value, "startDate": start_date, "endDate": end_date},
+            {"fetched": len(fetched), "cached": cached, "failed": failed, "at": now_iso(), "source": source, "range": range_value, "startDate": start_date, "endDate": end_date, "force": force},
             600,
         )
         for quote in fetched:
@@ -501,11 +502,11 @@ def refresh_market_data(
             "data-source.sync",
             "market-data",
             user_id=user_id,
-            metadata={"fetched": len(fetched), "cached": len(cached), "failed": len(failed), "source": source, "range": range_value, "startDate": start_date, "endDate": end_date},
+            metadata={"fetched": len(fetched), "cached": len(cached), "failed": len(failed), "source": source, "range": range_value, "startDate": start_date, "endDate": end_date, "force": force},
         )
 
     update_db(mutate)
-    return {"fetched": len(fetched), "cached": cached, "failed": failed, "source": source, "range": range_value, "startDate": start_date, "endDate": end_date}
+    return {"fetched": len(fetched), "cached": cached, "failed": failed, "source": source, "range": range_value, "startDate": start_date, "endDate": end_date, "force": force}
 
 
 def asset_refresh_cache_hit(db: dict[str, Any], market_id: MarketId, asset_id: str, range_value: Range, start_date: str | None, end_date: str | None) -> bool:

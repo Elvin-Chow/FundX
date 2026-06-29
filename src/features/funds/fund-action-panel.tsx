@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { RefreshIconButton } from "@/components/refresh-icon-button";
-import { apiErrorMessage, apiGet, apiPost } from "@/lib/api-client";
+import { apiErrorMessage, apiGet } from "@/lib/api-client";
 import type { AssetDetailResponse } from "@/lib/api-contracts";
 import { t, type Language } from "@/lib/i18n";
 import { upsertLocalWatchlistItem } from "@/lib/local-user-data";
+import { dispatchMarketDataRefresh, refreshResultChangedData } from "@/lib/market-data-refresh-event";
+import { publicDataRefreshStatus } from "@/lib/public-data-refresh-status";
 import type { Fund, MarketId } from "@/lib/types";
 
 type FundActionPanelProps = {
@@ -43,8 +45,23 @@ export function FundActionPanel({ marketId, fund, language = "en" }: FundActionP
     setPending(true);
     setResult(t(language, "fund.refreshing", { symbol: fund.symbol }));
     try {
-      await apiPost("/api/jobs", { marketId, type: "sync-nav" }, { market: marketId });
-      setResult(t(language, "fund.refreshCompleted"));
+      const response = await apiGet<AssetDetailResponse>(`/api/assets/${encodeURIComponent(fund.id)}`, {
+        market: marketId,
+        type: "fund",
+        refresh: true,
+        forceRefresh: true,
+      });
+      if (refreshResultChangedData(response.refreshResult)) {
+        dispatchMarketDataRefresh({
+          marketId,
+          assetIds: [response.asset.id],
+          assetTypes: [response.asset.assetType],
+          scopes: ["asset"],
+          source: response.refreshResult?.source,
+          result: response.refreshResult,
+        });
+      }
+      setResult(publicDataRefreshStatus(response.refreshResult, language, "fund.refreshCompleted"));
     } catch (error) {
       setResult(apiErrorMessage(error));
     } finally {

@@ -105,11 +105,12 @@ async def run_calculation_route(request: Request) -> dict[str, Any]:
     workflow = require_workflow(body.get("workflow"))
     assets = require_assets(body.get("assets"))
     params = body.get("params") if isinstance(body.get("params"), dict) else {}
-    refresh = body.get("refresh") is not False
+    force_refresh = body.get("forceRefresh") is True or body.get("force") is True
+    refresh = body.get("refresh") is True or force_refresh
     user_id = current_user_id(request)
     db = read_db()
     assets = derive_assets_for_workflow(db, user_id, market_id, workflow, assets, params)
-    refresh_result = sync_selected_assets(db, user_id, market_id, assets, params) if refresh else no_refresh_result()
+    refresh_result = sync_selected_assets(db, user_id, market_id, assets, params, force=force_refresh) if refresh else no_refresh_result("not-requested")
     db = read_db()
     warnings = warnings_from_refresh(refresh_result)
     result = build_calculation_result(db, user_id, market_id, workflow, assets, params, refresh_result)
@@ -200,6 +201,8 @@ def sync_selected_assets(
     market_id: MarketId,
     assets: list[dict[str, str]],
     params: dict[str, Any],
+    *,
+    force: bool = False,
 ) -> dict[str, Any]:
     public_asset_ids = list(
         dict.fromkeys(
@@ -209,10 +212,10 @@ def sync_selected_assets(
         )
     )
     if not public_asset_ids:
-        return no_refresh_result()
+        return no_refresh_result("no-public-assets")
     range_value, start_date, end_date = market_data_request_window(params)
     try:
-        return refresh_market_data(user_id=user_id, market_id=market_id, asset_ids=public_asset_ids, range_value=range_value, start_date=start_date, end_date=end_date)
+        return refresh_market_data(user_id=user_id, market_id=market_id, asset_ids=public_asset_ids, range_value=range_value, start_date=start_date, end_date=end_date, force=force)
     except Exception as exc:
         return {
             "fetched": 0,
@@ -263,8 +266,8 @@ def market_data_request_window(params: dict[str, Any]) -> tuple[str, str | None,
     return range_map.get(requested_range or "ALL", "max"), None, None
 
 
-def no_refresh_result() -> dict[str, Any]:
-    return {"fetched": 0, "failed": [], "source": "not-requested", "skipped": "no-public-assets"}
+def no_refresh_result(skipped: str) -> dict[str, Any]:
+    return {"fetched": 0, "failed": [], "source": "not-requested", "skipped": skipped}
 
 
 def warnings_from_refresh(refresh_result: dict[str, Any]) -> list[dict[str, str]]:

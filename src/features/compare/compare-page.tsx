@@ -112,7 +112,6 @@ export function ComparePage({
       workflow: "compare",
       assets: selectedIds.map((assetId) => ({ assetId, assetType: selectedAssetsById[assetId]?.assetType ?? "fund" })),
       params: {},
-      refresh: true,
     });
     if (!response?.result) return;
 

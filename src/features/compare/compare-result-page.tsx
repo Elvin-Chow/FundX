@@ -58,7 +58,6 @@ export function CompareResultPage({
         workflow: "compare",
         assets: requestedIds.map((assetId) => ({ assetId, assetType: "fund" })),
         params: {},
-        refresh: true,
       });
       if (cancelled || !response?.result) return;
       const nextCache: CompareResultCache = {

@@ -143,7 +143,6 @@ export function DCASimulator({ marketId, fundId, language: languageProp = "en" }
       workflow: "dca",
       assets: [{ assetId: selectedAsset.id, assetType: selectedAsset.assetType }],
       params: input,
-      refresh: true,
     });
     if (!response?.result) return;
 

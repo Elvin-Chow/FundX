@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { apiGet } from "@/lib/api-client";
 import type { CustomFundsResponse } from "@/lib/api-contracts";
+import { MARKET_DATA_REFRESH_EVENT, marketDataRefreshDetail } from "@/lib/market-data-refresh-event";
 import type { MarketId } from "@/lib/types";
 import {
   buildLocalCustomFundsResponse,
@@ -22,7 +23,20 @@ export function useCustomFunds(marketId: MarketId) {
     },
     [marketId],
   );
-  const resource = useApiResource(load, [load], { cacheKey: `custom-funds:${marketId}`, keepPreviousData: false, staleTimeMs: 60_000 });
+  const cacheKey = `custom-funds:${marketId}`;
+  const resource = useApiResource(load, [load], { cacheKey, keepPreviousData: false, staleTimeMs: 60_000 });
+  const refreshResource = resource.refresh;
+
+  useEffect(() => {
+    function handleMarketDataRefresh(event: Event) {
+      const detail = marketDataRefreshDetail(event);
+      if (detail?.marketId !== marketId) return;
+      void refreshResource("reload");
+    }
+
+    window.addEventListener(MARKET_DATA_REFRESH_EVENT, handleMarketDataRefresh);
+    return () => window.removeEventListener(MARKET_DATA_REFRESH_EVENT, handleMarketDataRefresh);
+  }, [marketId, refreshResource]);
 
   async function saveCustomFund(input: CustomFundSaveInput) {
     createLocalCustomFund(marketId, input, resource.data?.universe ?? []);

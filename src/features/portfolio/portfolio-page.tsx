@@ -300,7 +300,6 @@ export function PortfolioPage({ market = "us", marketId, language: languageProp 
       workflow: "portfolio",
       assets: selectedAssets.map((asset) => ({ assetId: asset.id, assetType: asset.assetType })),
       params,
-      refresh: true,
     }, { market: activeMarket });
     if (!response.result) throw new Error(t(language, "portfolio.noResultTitle"));
     return response;
@@ -344,7 +343,6 @@ export function PortfolioPage({ market = "us", marketId, language: languageProp 
       workflow: "portfolio",
       assets: selectedAssets.map((asset) => ({ assetId: asset.id, assetType: asset.assetType })),
       params: input,
-      refresh: true,
     });
     if (!response?.result) return;
 

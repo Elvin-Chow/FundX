@@ -85,7 +85,6 @@ function msUntilWatchlistAutoRefresh(marketId: MarketId) {
 function claimWatchlistAutoRefresh(marketId: MarketId) {
   if (!shouldAutoRefreshWatchlist(marketId) || autoRefreshInFlight.has(marketId)) return false;
   autoRefreshInFlight.add(marketId);
-  writeLastRefreshAt(marketId);
   return true;
 }
 
@@ -207,8 +206,8 @@ export function WatchlistClient({ marketId, language: languageProp = "en" }: { m
     setRefreshing(true);
     setStatus(t(language, "watchlist.refreshing"));
     try {
-      const response = await watchlist.refreshPrices();
-      writeLastRefreshAt(marketId);
+      const response = await watchlist.refreshPrices({ forceRefresh: !automatic });
+      if (shouldRememberWatchlistRefresh(response)) writeLastRefreshAt(marketId);
       setStatus(refreshStatus(response, language));
       await search.refresh("reload");
     } catch (error) {
@@ -275,7 +274,7 @@ export function WatchlistClient({ marketId, language: languageProp = "en" }: { m
               onClick={() => void refreshQuotes()}
               disabled={!rows.length || refreshing || watchlist.reloading}
               loading={refreshing || watchlist.reloading}
-              label={t(language, "common.reload")}
+              label={t(language, "common.refreshQuotes")}
             />
           </div>
         }
@@ -537,8 +536,15 @@ function refreshStatus(response: WatchlistResponse, language: Language) {
   const result = response.refreshResult;
   if (!result) return t(language, "watchlist.status.synced");
   if (result.fetched > 0) return t(language, "watchlist.refreshedWithCount", { count: result.fetched });
+  if (result.cached?.length && !result.failed?.length) return t(language, "watchlist.refreshCachedWithCount", { count: result.cached.length });
   if (result.failed?.length) return t(language, "watchlist.refreshFailed", { reason: refreshFailureReason(result.failed[0]) });
-  return t(language, "watchlist.refreshed");
+  return t(language, "watchlist.refreshNoNewData");
+}
+
+function shouldRememberWatchlistRefresh(response: WatchlistResponse) {
+  const result = response.refreshResult;
+  if (!result) return true;
+  return result.fetched > 0 || Boolean(result.cached?.length) || !result.failed?.length;
 }
 
 function refreshFailureReason(value: unknown) {

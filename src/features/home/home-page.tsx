@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, Gauge, LineChart as LineChartIcon, PieChart, ShieldAlert, WalletCards, type LucideIcon } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { CustomSelect } from "@/components/custom-select";
@@ -21,7 +21,8 @@ import { normalizeMarket, type Market } from "../../components/types";
 import { readCustomFundResultCache } from "../custom-fund/custom-fund-result-store";
 import { AssetList, LoadingRows, PageHeader, Section, StatusBanner, ToneText } from "../shared/feature-shell";
 import { HomeValueChart } from "./home-value-chart";
-import { useApiResource } from "@/hooks/use-api-resource";
+import { invalidateApiResourceCachePrefix, useApiResource } from "@/hooks/use-api-resource";
+import { dispatchMarketDataRefresh, MARKET_DATA_REFRESH_EVENT, marketDataRefreshDetail, refreshResultChangedData } from "@/lib/market-data-refresh-event";
 
 type MarketTopsResponse = {
   marketId: MarketId;
@@ -45,6 +46,7 @@ type HomeAssetQuote = {
   price: number | null;
   dailyChange: number | null;
   history: TimePoint[];
+  quoteStatus?: AssetRecord["quoteStatus"];
   updatedAt?: string;
 };
 
@@ -79,6 +81,8 @@ type DashboardBar = {
 
 const autoTopRefreshInFlight = new Set<MarketId>();
 const topMarketRefreshMemory = new Map<MarketId, number>();
+const HOME_DISPLAY_QUOTE_STALE_MS = 12 * 60 * 60 * 1000;
+const HOME_DISPLAY_AUTO_REFRESH_DELAY_MS = 1200;
 
 export function HomePage({ market = "us", marketId, language: languageProp = "en" }: { market?: Market; marketId?: Market; language?: Language }) {
   const activeMarket = normalizeMarket(marketId ?? market);
@@ -91,6 +95,7 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
   const [homeSelection, setHomeSelection] = useState<HomeDisplaySelection | null>(() => readHomeDisplaySelection(activeMarket));
   const [customFundResultCache, setCustomFundResultCache] = useState(() => readCustomFundResultCache(activeMarket));
   const [topAutoRefreshTick, setTopAutoRefreshTick] = useState(0);
+  const homeDisplayAutoRefreshAttempts = useRef<Set<string>>(new Set());
   const selectedPortfolioId = homeSelection?.kind === "portfolio" ? homeSelection.id : "";
   const selectedCustomFundId = homeSelection?.kind === "customFund" ? homeSelection.id : "";
   const load = useCallback(
@@ -117,6 +122,7 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
     keepPreviousData: true,
     staleTimeMs: TOP_CACHE_MAX_AGE_MS,
   });
+  const refreshMarketTopsResource = marketTops.refresh;
   const liveTopStocks = useMemo(() => sanitizeTopAssetsResponse(marketTops.data?.marketId === activeMarket ? marketTops.data.stocks : null), [activeMarket, marketTops.data]);
   const liveTopFunds = useMemo(() => sanitizeTopAssetsResponse(marketTops.data?.marketId === activeMarket ? marketTops.data.funds : null), [activeMarket, marketTops.data]);
   const displayedTopStocks = useMemo(() => liveTopStocks ?? sanitizeTopAssetsResponse(cachedTopStocks), [cachedTopStocks, liveTopStocks]);
@@ -150,6 +156,7 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
     keepPreviousData: true,
     staleTimeMs: 60_000,
   });
+  const refreshHomeQuotesResource = homeQuotes.refresh;
   const homeQuoteById = useMemo(() => {
     const selectedIds = new Set(homeQuoteRequests.map((request) => request.id));
     const quotes = new Map<string, HomeAssetQuote>();
@@ -159,7 +166,7 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
     return quotes;
   }, [homeQuoteRequests, homeQuotes.data]);
   const portfolioDisplay = useMemo(
-    () => (summary && !hasCalculatedValueHistory(summary) ? buildPortfolioDisplaySummary(summary, homeQuoteById) : null),
+    () => (summary ? buildPortfolioDisplaySummary(summary, homeQuoteById) : null),
     [homeQuoteById, summary],
   );
   const selectedCustomFundSummary = useMemo(
@@ -226,12 +233,24 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
         ]);
         marketTops.setData({ marketId: activeMarket, stocks, funds });
         const bothSkipped = stocks.refreshSkipped === "recent" && funds.refreshSkipped === "recent";
-        const refreshSucceeded = didTopMarketRefreshSucceed(stocks, funds);
-        if (refreshSucceeded) {
+        const stocksRefreshed = didTopMarketResponseRefreshSucceed(stocks);
+        const fundsRefreshed = didTopMarketResponseRefreshSucceed(funds);
+        const allRefreshSucceeded = stocksRefreshed && fundsRefreshed;
+        const changedAssets = [...(stocksRefreshed ? stocks.items : []), ...(fundsRefreshed ? funds.items : [])];
+        if (allRefreshSucceeded || bothSkipped) {
           writeTopMarketRefreshAt(activeMarket);
+        }
+        if (changedAssets.length) {
+          dispatchMarketDataRefresh({
+            marketId: activeMarket,
+            assetIds: changedAssets.map((asset) => asset.id),
+            assetTypes: changedAssets.map((asset) => asset.assetType),
+            scopes: ["market-top", "asset"],
+            result: { stocks: stocks.refreshResult, funds: funds.refreshResult },
+          });
           void refreshPortfolioResource("reload");
         }
-        setTopRefreshStatus(topRefreshCopy(language, bothSkipped ? "fresh" : refreshSucceeded ? "updated" : "failed"));
+        setTopRefreshStatus(topRefreshCopy(language, bothSkipped ? "fresh" : changedAssets.length ? "updated" : "failed"));
       } catch {
         setTopRefreshStatus(topRefreshCopy(language, "failed"));
       } finally {
@@ -242,6 +261,47 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
     [activeMarket, language, marketTops, refreshPortfolioResource],
   );
 
+  const refreshHomeDisplayPublicData = useCallback(
+    async (requests: HomeAssetQuoteRequest[]) => {
+      const publicRequests = uniqueQuoteRequests(requests.filter(isPublicHomeQuoteRequest));
+      if (!publicRequests.length) return;
+      const results = await Promise.all(publicRequests.map(async (request) => {
+        try {
+          const response = await apiGet<AssetDetailResponse>(`/api/assets/${encodeURIComponent(request.id)}`, {
+            market: activeMarket,
+            type: request.assetType,
+            refresh: true,
+            range: "1mo",
+          });
+          return { request, response };
+        } catch (error) {
+          return { request, error };
+        }
+      }));
+      const successfulResults = results.filter((result): result is { request: HomeAssetQuoteRequest; response: AssetDetailResponse } => "response" in result && Boolean(result.response));
+      const changedAssets = successfulResults.flatMap((result) => (
+        refreshResultChangedData(result.response.refreshResult)
+          ? [result.response.asset]
+          : []
+      ));
+      await refreshHomeQuotesResource("reload");
+      if (changedAssets.length) {
+        dispatchMarketDataRefresh({
+          marketId: activeMarket,
+          assetIds: changedAssets.map((asset) => asset.id),
+          assetTypes: changedAssets.map((asset) => asset.assetType),
+          scopes: ["asset", "home-display"],
+          source: successfulResults.find((result) => result.response.refreshResult?.source)?.response.refreshResult?.source,
+          result: {
+            source: "home-display",
+            refreshed: successfulResults.map((result) => result.response.refreshResult),
+          },
+        });
+      }
+    },
+    [activeMarket, refreshHomeQuotesResource],
+  );
+
   useEffect(() => {
     purgeLegacyTopAssetCaches(activeMarket);
     setHomeSelection(readHomeDisplaySelection(activeMarket));
@@ -250,6 +310,18 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
     setCachedTopFunds(readTopAssetsCache(activeMarket, "fund"));
     setTopRefreshStatus(topRefreshCopy(language, isTopAssetsCacheFresh(activeMarket, "stock") || isTopAssetsCacheFresh(activeMarket, "fund") ? "cached" : "ready"));
   }, [activeMarket, language]);
+
+  useEffect(() => {
+    if (!homeSelection || !homeQuoteRequests.length || homeQuotes.loading || homeQuotes.reloading) return;
+    if (isDocumentHidden()) return;
+    const staleRequests = staleHomeDisplayQuoteRequests(homeQuoteRequests, homeQuotes.data ?? []);
+    if (!staleRequests.length) return;
+    const attemptKey = homeDisplayRefreshAttemptKey(activeMarket, homeSelection, staleRequests);
+    if (homeDisplayAutoRefreshAttempts.current.has(attemptKey)) return;
+    homeDisplayAutoRefreshAttempts.current.add(attemptKey);
+    const timeout = window.setTimeout(() => void refreshHomeDisplayPublicData(staleRequests), HOME_DISPLAY_AUTO_REFRESH_DELAY_MS);
+    return () => window.clearTimeout(timeout);
+  }, [activeMarket, homeQuoteRequests, homeQuotes.data, homeQuotes.loading, homeQuotes.reloading, homeSelection, refreshHomeDisplayPublicData]);
 
   useEffect(() => {
     if (!homeSelection || resource.loading || customFunds.loading || !data?.portfolios || !customFunds.data?.customFunds) return;
@@ -317,6 +389,23 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
       document.removeEventListener("visibilitychange", recheckWhenVisible);
     };
   }, []);
+
+  useEffect(() => {
+    function handleMarketDataRefresh(event: Event) {
+      const detail = marketDataRefreshDetail(event);
+      if (detail?.marketId !== activeMarket) return;
+      if (detail.scopes?.includes("home-display")) return;
+      invalidateApiResourceCachePrefix(`home-quotes:${activeMarket}:`);
+      if (!detail.scopes?.includes("market-top")) invalidateApiResourceCachePrefix(`home-market-tops:${activeMarket}`);
+      const watchedIds = new Set(homeQuoteRequests.map((request) => request.id));
+      const affectsHomeQuotes = !detail.assetIds?.length || detail.assetIds.some((assetId) => watchedIds.has(assetId));
+      if (affectsHomeQuotes) void refreshHomeQuotesResource("reload");
+      if (!detail.scopes?.includes("market-top") && !detail.assetIds?.length) void refreshMarketTopsResource("reload");
+    }
+
+    window.addEventListener(MARKET_DATA_REFRESH_EVENT, handleMarketDataRefresh);
+    return () => window.removeEventListener(MARKET_DATA_REFRESH_EVENT, handleMarketDataRefresh);
+  }, [activeMarket, homeQuoteRequests, refreshHomeQuotesResource, refreshMarketTopsResource]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -452,7 +541,7 @@ export function HomePage({ market = "us", marketId, language: languageProp = "en
               onClick={() => void refreshTopMarkets("force")}
               disabled={refreshingMarketTops}
               loading={refreshingMarketTops}
-              label={t(language, "common.reload")}
+              label={t(language, "common.refreshQuotes")}
               iconSize={15}
               className="h-7 w-7"
             />
@@ -912,7 +1001,6 @@ function msUntilTopMarketAutoRefresh(marketId: MarketId) {
 function claimTopMarketAutoRefresh(marketId: MarketId) {
   if (!shouldAutoRefreshTopMarkets(marketId) || autoTopRefreshInFlight.has(marketId)) return false;
   autoTopRefreshInFlight.add(marketId);
-  writeTopMarketRefreshAt(marketId);
   return true;
 }
 
@@ -963,10 +1051,6 @@ function sanitizeTopAssetsResponse(payload: MarketTopResponse | null): MarketTop
 function markTopAssetsAsCached(payload: MarketTopResponse): MarketTopResponse {
   const { refreshResult: _refreshResult, refreshSkipped: _refreshSkipped, ...rest } = payload;
   return { ...rest, refreshed: false, cached: true };
-}
-
-function didTopMarketRefreshSucceed(stocks: MarketTopResponse, funds: MarketTopResponse) {
-  return didTopMarketResponseRefreshSucceed(stocks) && didTopMarketResponseRefreshSucceed(funds);
 }
 
 function didTopMarketResponseRefreshSucceed(response: MarketTopResponse) {
@@ -1061,6 +1145,34 @@ function uniqueQuoteRequests(requests: HomeAssetQuoteRequest[]) {
   });
 }
 
+function isPublicHomeQuoteRequest(request: HomeAssetQuoteRequest) {
+  return request.assetType === "stock" || request.assetType === "fund" || request.assetType === "etf";
+}
+
+function staleHomeDisplayQuoteRequests(requests: HomeAssetQuoteRequest[], quotes: HomeAssetQuote[]) {
+  const quoteById = new Map(quotes.map((quote) => [quote.id, quote]));
+  return requests.filter((request) => {
+    if (!isPublicHomeQuoteRequest(request)) return false;
+    const quote = quoteById.get(request.id);
+    return !quote || homeAssetQuoteIsStale(quote);
+  });
+}
+
+function homeAssetQuoteIsStale(quote: HomeAssetQuote) {
+  if (quote.quoteStatus && quote.quoteStatus !== "fresh") return true;
+  const updatedAt = quote.updatedAt ? Date.parse(quote.updatedAt) : NaN;
+  if (!Number.isFinite(updatedAt)) return true;
+  return Date.now() - updatedAt > HOME_DISPLAY_QUOTE_STALE_MS;
+}
+
+function homeDisplayRefreshAttemptKey(marketId: MarketId, selection: HomeDisplaySelection, requests: HomeAssetQuoteRequest[]) {
+  const assets = uniqueQuoteRequests(requests)
+    .map((request) => `${request.assetType}:${request.id}`)
+    .sort()
+    .join(",");
+  return `${marketId}:${selection.kind}:${selection.id}:${assets}`;
+}
+
 async function loadLatestHomeAssetQuotes(marketId: MarketId, requests: HomeAssetQuoteRequest[], signal: AbortSignal) {
   const quotes = await Promise.all(requests.map(async (request) => {
     if (signal.aborted) return null;
@@ -1089,7 +1201,8 @@ function homeAssetQuoteFromDetail(response: AssetDetailResponse, request: HomeAs
     price,
     dailyChange: finiteNumber(asset.dailyChange) ?? historyDailyChange(history),
     history,
-    updatedAt: response.updatedAt || asset.updatedAt,
+    quoteStatus: asset.quoteStatus,
+    updatedAt: asset.quoteFetchedAt || response.updatedAt || asset.updatedAt,
   };
 }
 
@@ -1121,10 +1234,6 @@ function buildPortfolioDisplaySummary(summary: PortfolioSummary, quoteById: Map<
       };
     }),
   };
-}
-
-function hasCalculatedValueHistory(summary: PortfolioSummary) {
-  return sanitizeTimePoints(summary.valueHistory).length > 0;
 }
 
 type CustomFundValueEstimate = {

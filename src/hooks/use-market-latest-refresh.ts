@@ -3,9 +3,10 @@
 import { useEffect } from "react";
 import { apiPost } from "@/lib/api-client";
 import type { JobsResponse } from "@/lib/api-contracts";
+import { dispatchMarketDataRefresh, MARKET_DATA_REFRESH_EVENT } from "@/lib/market-data-refresh-event";
 import type { MarketId } from "@/lib/types";
 
-export const MARKET_LATEST_REFRESH_EVENT = "fundx:market-latest-refreshed";
+export const MARKET_LATEST_REFRESH_EVENT = MARKET_DATA_REFRESH_EVENT;
 
 const MARKET_LATEST_AUTO_CHECK_MS = 5 * 60 * 1000;
 const MARKET_LATEST_INITIAL_DELAY_MS = 15_000;
@@ -24,7 +25,10 @@ export function useMarketLatestRefresh(marketId: MarketId) {
         .then((response) => {
           const result = response.job?.result;
           if (!stopped && marketLatestJobUpdatedData(result)) {
-            window.dispatchEvent(new CustomEvent(MARKET_LATEST_REFRESH_EVENT, { detail: { marketId, result } }));
+            writeLastMarketLatestCheck(marketId);
+            dispatchMarketDataRefresh({ marketId, scopes: ["market-latest"], result });
+          } else if (!stopped && marketLatestJobWasRecent(result)) {
+            writeLastMarketLatestCheck(marketId);
           }
         })
         .catch(() => {
@@ -49,7 +53,6 @@ function claimMarketLatestRefreshCheck(marketId: MarketId) {
   if (marketLatestInFlight.has(marketId)) return false;
   if (Date.now() - readLastMarketLatestCheck(marketId) < MARKET_LATEST_AUTO_CHECK_MS) return false;
   marketLatestInFlight.add(marketId);
-  writeLastMarketLatestCheck(marketId);
   return true;
 }
 
@@ -82,6 +85,10 @@ function marketLatestRefreshKey(marketId: MarketId) {
 function marketLatestJobUpdatedData(result: Record<string, unknown> | undefined) {
   if (!result || result.skipped) return false;
   return numericResult(result.fetched) > 0 || numericResult(result.synced) > 0;
+}
+
+function marketLatestJobWasRecent(result: Record<string, unknown> | undefined) {
+  return result?.skipped === "recent";
 }
 
 function numericResult(value: unknown) {

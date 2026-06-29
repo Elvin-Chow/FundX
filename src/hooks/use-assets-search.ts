@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MARKET_LATEST_REFRESH_EVENT } from "@/hooks/use-market-latest-refresh";
 import { apiGet, apiPost } from "@/lib/api-client";
 import type { AssetSearchResponse, AssetSearchType, JobsResponse } from "@/lib/api-contracts";
+import { MARKET_DATA_REFRESH_EVENT, dispatchMarketDataRefresh, marketDataRefreshDetail, refreshResultChangedData } from "@/lib/market-data-refresh-event";
 import type { MarketId, SearchSortKey } from "@/lib/types";
-import { useApiResource } from "./use-api-resource";
+import { invalidateApiResourceCachePrefix, useApiResource } from "./use-api-resource";
 
 export type AssetSearchFilters = {
   q: string;
@@ -53,13 +53,14 @@ export function useAssetsSearch(marketId: MarketId, initial: Partial<AssetSearch
 
   useEffect(() => {
     function handleMarketLatestRefresh(event: Event) {
-      const detail = (event as CustomEvent<{ marketId?: MarketId }>).detail;
+      const detail = marketDataRefreshDetail(event);
       if (detail?.marketId !== marketId) return;
+      invalidateApiResourceCachePrefix(`assets-search:{"market":"${marketId}"`);
       void refreshResource("reload");
     }
 
-    window.addEventListener(MARKET_LATEST_REFRESH_EVENT, handleMarketLatestRefresh);
-    return () => window.removeEventListener(MARKET_LATEST_REFRESH_EVENT, handleMarketLatestRefresh);
+    window.addEventListener(MARKET_DATA_REFRESH_EVENT, handleMarketLatestRefresh);
+    return () => window.removeEventListener(MARKET_DATA_REFRESH_EVENT, handleMarketLatestRefresh);
   }, [marketId, refreshResource]);
 
   const updateFilters = useCallback((next: Partial<AssetSearchFilters>) => {
@@ -72,6 +73,9 @@ export function useAssetsSearch(marketId: MarketId, initial: Partial<AssetSearch
 
   const refreshPublicData = useCallback(async () => {
     const response = await apiPost<JobsResponse>("/api/jobs", { marketId, type: "sync-universe" }, { market: marketId });
+    if (refreshResultChangedData(response.job?.result)) {
+      dispatchMarketDataRefresh({ marketId, scopes: ["universe"], result: response.job?.result });
+    }
     await refreshResource("reload");
     return response;
   }, [marketId, refreshResource]);

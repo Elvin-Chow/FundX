@@ -542,7 +542,8 @@ def refresh_assets_if_requested(
     from .data_sources import refresh_market_data
 
     range_value, start_date, end_date = asset_refresh_window(request)
-    return refresh_market_data(user_id=current_user_id(request), market_id=market_id, asset_ids=asset_ids, range_value=range_value, start_date=start_date, end_date=end_date)
+    force = parse_force_refresh(request.query_params.get("forceRefresh") or request.query_params.get("force"))
+    return refresh_market_data(user_id=current_user_id(request), market_id=market_id, asset_ids=asset_ids, range_value=range_value, start_date=start_date, end_date=end_date, force=force)
 
 
 def asset_refresh_window(request: Request) -> tuple[str, str | None, str | None]:
@@ -594,6 +595,14 @@ def parse_refresh(value: str | None) -> bool:
     if value in ("true", "1"):
         return True
     raise validation_error("refresh must be one of: true, false, 1, 0.")
+
+
+def parse_force_refresh(value: str | None) -> bool:
+    if value in (None, "", "false", "0"):
+        return False
+    if value in ("true", "1"):
+        return True
+    raise validation_error("forceRefresh must be one of: true, false, 1, 0.")
 
 
 def tone_from_change(value: Any) -> str:

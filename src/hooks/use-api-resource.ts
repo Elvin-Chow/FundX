@@ -21,6 +21,20 @@ const resourceCache = new Map<string, CachedResource<unknown>>();
 const resourceInFlight = new Map<string, Promise<unknown>>();
 const DEFAULT_STALE_TIME_MS = 60_000;
 
+export function invalidateApiResourceCache(cacheKey: string) {
+  resourceCache.delete(cacheKey);
+  resourceInFlight.delete(cacheKey);
+}
+
+export function invalidateApiResourceCachePrefix(prefix: string) {
+  for (const key of resourceCache.keys()) {
+    if (key.startsWith(prefix)) resourceCache.delete(key);
+  }
+  for (const key of resourceInFlight.keys()) {
+    if (key.startsWith(prefix)) resourceInFlight.delete(key);
+  }
+}
+
 export function useApiResource<T>(
   load: (signal: AbortSignal) => Promise<T>,
   deps: readonly unknown[],
@@ -75,6 +89,17 @@ export function useApiResource<T>(
     },
     [cacheKey, enabled, keepPreviousData, load, staleTimeMs],
   );
+
+  const setData = useCallback((updater: T | ((current: T | null) => T | null)) => {
+    setState((current) => ({
+      ...current,
+      data: updateCachedData(cacheKey, typeof updater === "function" ? (updater as (current: T | null) => T | null)(current.data) : updater),
+    }));
+  }, [cacheKey]);
+
+  const setError = useCallback((error: string | null) => {
+    setState((current) => ({ ...current, error }));
+  }, []);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -135,13 +160,8 @@ export function useApiResource<T>(
   return {
     ...state,
     refresh: run,
-    setData: (updater: T | ((current: T | null) => T | null)) => {
-      setState((current) => ({
-        ...current,
-        data: updateCachedData(cacheKey, typeof updater === "function" ? (updater as (current: T | null) => T | null)(current.data) : updater),
-      }));
-    },
-    setError: (error: string | null) => setState((current) => ({ ...current, error })),
+    setData,
+    setError,
   };
 }
 

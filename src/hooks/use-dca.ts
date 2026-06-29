@@ -65,7 +65,6 @@ async function buildDcaPlanSavePayload(marketId: MarketId, input: DcaInput & { n
     workflow: "dca",
     assets: [{ assetId: input.fundId, assetType }],
     params: input,
-    refresh: true,
   }, { market: marketId });
   if (!response.result?.asset || !response.result?.simulation) throw new Error("DCA simulation was not available.");
   return {

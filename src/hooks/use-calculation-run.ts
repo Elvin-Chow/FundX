@@ -15,6 +15,7 @@ type RunInput = {
   assets: CalculationAssetInput[];
   params?: Record<string, unknown>;
   refresh?: boolean;
+  forceRefresh?: boolean;
 };
 
 export function useCalculationRun<T = unknown>(marketId: MarketId) {
@@ -23,7 +24,7 @@ export function useCalculationRun<T = unknown>(marketId: MarketId) {
   const [running, setRunning] = useState(false);
 
   const run = useCallback(
-    async ({ workflow, assets, params, refresh = true }: RunInput) => {
+    async ({ workflow, assets, params, refresh = false, forceRefresh = false }: RunInput) => {
       setRunning(true);
       setError(null);
       try {
@@ -32,7 +33,8 @@ export function useCalculationRun<T = unknown>(marketId: MarketId) {
           workflow,
           assets,
           params,
-          refresh,
+          ...(refresh ? { refresh } : {}),
+          ...(forceRefresh ? { forceRefresh } : {}),
         };
         const response = await apiPost<CalculationResponse<T>>("/api/calculations", payload, { market: marketId });
         setData(response);

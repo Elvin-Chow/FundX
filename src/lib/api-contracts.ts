@@ -104,6 +104,20 @@ export type AssetSearchResponse = {
   };
 };
 
+export type PublicDataRefreshResult = {
+  fetched: number;
+  cached?: Array<{ assetId?: string; source?: string; reason: string }>;
+  failed: Array<{ assetId?: string; source?: string; reason: string }>;
+  source: string;
+  skipped?: string;
+  range?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  force?: boolean;
+  universe?: "full-market";
+  ranking?: "turnover";
+};
+
 export type AssetDetailResponse = {
   marketId: MarketId;
   asset: AssetRecord;
@@ -122,15 +136,7 @@ export type AssetDetailResponse = {
     createdAt?: string;
     expiresAt?: string;
   };
-  refreshResult?: {
-    fetched: number;
-    cached?: Array<{ assetId?: string; reason: string }>;
-    failed: Array<{ assetId?: string; reason: string }>;
-    source: string;
-    range?: string;
-    startDate?: string | null;
-    endDate?: string | null;
-  };
+  refreshResult?: PublicDataRefreshResult;
 };
 
 export type MarketTopResponse = {
@@ -145,17 +151,7 @@ export type MarketTopResponse = {
   refreshSkipped?: "recent";
   universe?: "full-market";
   ranking?: "turnover";
-  refreshResult?: {
-    fetched: number;
-    cached?: Array<{ assetId?: string; source?: string; reason: string }>;
-    failed: Array<{ assetId?: string; source?: string; reason: string }>;
-    source: string;
-    range?: string;
-    startDate?: string | null;
-    endDate?: string | null;
-    universe?: "full-market";
-    ranking?: "turnover";
-  };
+  refreshResult?: PublicDataRefreshResult;
 };
 
 export type FundsResponse = {
@@ -206,16 +202,7 @@ export type WatchlistResponse = {
   marketId: MarketId;
   watchlist: WatchlistItem[];
   view: WatchlistViewItem[];
-  refreshResult?: {
-    fetched: number;
-    cached?: Array<{ assetId?: string; reason: string }>;
-    failed: Array<{ assetId?: string; reason: string }>;
-    source: string;
-    skipped?: string;
-    range?: string;
-    startDate?: string | null;
-    endDate?: string | null;
-  };
+  refreshResult?: PublicDataRefreshResult;
 };
 
 export type PortfolioVersionRecord = {
@@ -363,7 +350,8 @@ export type CalculationRequest = {
   workflow: CalculationWorkflow;
   assets: CalculationAssetInput[];
   params?: Record<string, unknown>;
-  refresh: boolean;
+  refresh?: boolean;
+  forceRefresh?: boolean;
 };
 
 export type CalculationWarning = {
@@ -378,16 +366,7 @@ export type CalculationResponse<T = unknown> = {
   runId: string;
   computedAt: string;
   dataAsOf?: string;
-  refreshResult: {
-    fetched: number;
-    cached?: Array<{ assetId?: string; reason: string }>;
-    failed: Array<{ assetId?: string; reason: string }>;
-    source: string;
-    skipped?: string;
-    range?: string;
-    startDate?: string | null;
-    endDate?: string | null;
-  };
+  refreshResult: PublicDataRefreshResult;
   warnings: CalculationWarning[];
   result: T;
 };

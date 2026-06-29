@@ -1,27 +1,30 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { RefreshIconButton } from "@/components/refresh-icon-button";
-import { useCalculationRun } from "@/hooks/use-calculation-run";
-import { apiGet } from "@/lib/api-client";
+import { useApiResource } from "@/hooks/use-api-resource";
+import { apiErrorMessage, apiGet } from "@/lib/api-client";
 import { formatOptionalCompactCurrency, formatOptionalPercent } from "@/lib/formatters";
 import { t, type Language } from "@/lib/i18n";
+import { dispatchMarketDataRefresh, refreshResultChangedData } from "@/lib/market-data-refresh-event";
 import { readReturnToState } from "@/lib/navigation-state";
+import { publicDataRefreshStatus } from "@/lib/public-data-refresh-status";
 import type { Fund, MarketId } from "@/lib/types";
+import type { PublicDataRefreshResult } from "@/lib/api-contracts";
 import { AllocationDonut, LineChart } from "../../components/charts";
 import { normalizeMarket, type Market } from "../../components/types";
 import { LoadingRows, MetricStrip, PageHeader, Section, StatusBanner } from "../shared/feature-shell";
 import { SecondaryButton } from "../shared/calculation-workbench";
 import { FundActionPanel } from "./fund-action-panel";
-import { useApiResource } from "@/hooks/use-api-resource";
 
 type FundDetailResponse = {
   marketId: MarketId;
   source: string;
   updatedAt?: string;
   fund: Fund;
+  refreshResult?: PublicDataRefreshResult;
   calculated?: {
     volatility?: number;
     drawdown?: unknown;
@@ -32,7 +35,8 @@ export function FundDetailPage({ market = "us", marketId, fundId, language = "en
   const activeMarket = normalizeMarket(marketId ?? market);
   const location = useLocation();
   const navigate = useNavigate();
-  const calculation = useCalculationRun(activeMarket);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshStatus, setRefreshStatus] = useState("");
   const load = useCallback(
     (signal: AbortSignal) => apiGet<FundDetailResponse>(`/api/funds/${fundId}`, { market: activeMarket }, signal),
     [activeMarket, fundId],
@@ -89,6 +93,34 @@ export function FundDetailPage({ market = "us", marketId, fundId, language = "en
     { label: t(language, "fund.maxDrawdown"), value: drawdown?.maxDrawdown == null ? "—" : `${drawdown.maxDrawdown}%`, tone: "negative" as const },
   ];
 
+  async function refreshFundPublicData(currentFund: Fund) {
+    setRefreshing(true);
+    setRefreshStatus(t(language, "fund.refreshing", { symbol: currentFund.symbol }));
+    try {
+      const response = await apiGet<FundDetailResponse>(`/api/funds/${encodeURIComponent(currentFund.id)}`, {
+        market: activeMarket,
+        refresh: true,
+        forceRefresh: true,
+      });
+      resource.setData(response);
+      if (refreshResultChangedData(response.refreshResult)) {
+        dispatchMarketDataRefresh({
+          marketId: activeMarket,
+          assetIds: [currentFund.id],
+          assetTypes: ["fund"],
+          scopes: ["asset"],
+          source: response.refreshResult?.source,
+          result: response.refreshResult,
+        });
+      }
+      setRefreshStatus(publicDataRefreshStatus(response.refreshResult, language, "fund.refreshCompleted"));
+    } catch (error) {
+      setRefreshStatus(apiErrorMessage(error));
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   return (
     <div>
       {backButton}
@@ -98,23 +130,16 @@ export function FundDetailPage({ market = "us", marketId, fundId, language = "en
         description={[fund.category, fund.style].filter(Boolean).join(" · ")}
         action={
           <RefreshIconButton
-            onClick={() => {
-              void calculation.run({
-                workflow: "fund-detail",
-                assets: [{ assetId: fund.id, assetType: "fund" }],
-                params: {},
-                refresh: true,
-              }).then(() => resource.refresh("reload"));
-            }}
-            disabled={calculation.running}
-            loading={calculation.running}
+            onClick={() => void refreshFundPublicData(fund)}
+            disabled={refreshing}
+            loading={refreshing}
             label={t(language, "common.refreshPublicData")}
           />
         }
       />
-      {calculation.error || calculation.warnings.length ? (
+      {refreshStatus ? (
         <Section>
-          <StatusBanner title={calculation.error ?? "Fund calculation completed with warnings."} body={calculation.warnings.map((warning) => warning.message).join(" ")} tone={calculation.error ? "negative" : "neutral"} />
+          <StatusBanner title={refreshStatus} tone="neutral" />
         </Section>
       ) : null}
       <Section>

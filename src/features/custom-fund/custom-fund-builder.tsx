@@ -169,7 +169,6 @@ export function CustomFundBuilder({ marketId, language: languageProp = "en" }: {
       workflow: "custom-fund",
       assets: selectedAssets.map((asset) => ({ assetId: asset.id, assetType: "stock" })),
       params: input,
-      refresh: true,
     });
     if (!response?.result) return;
 

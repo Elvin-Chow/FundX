@@ -4,22 +4,23 @@ import { ArrowLeft, Loader2, Star } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { RefreshIconButton } from "@/components/refresh-icon-button";
-import { useCalculationRun } from "@/hooks/use-calculation-run";
 import { useResolvedLanguage } from "@/hooks/use-language";
+import { invalidateApiResourceCache, useApiResource } from "@/hooks/use-api-resource";
 import { apiErrorMessage, apiGet } from "@/lib/api-client";
 import type { AssetDetailResponse } from "@/lib/api-contracts";
 import { formatCompactCurrency, formatNumber, formatOptionalCompactCurrency, formatOptionalPercent } from "@/lib/formatters";
 import { assetTypeLabel, localeForLanguage, t, type Language } from "@/lib/i18n";
 import { upsertLocalWatchlistItem } from "@/lib/local-user-data";
+import { dispatchMarketDataRefresh, MARKET_DATA_REFRESH_EVENT, marketDataRefreshDetail, refreshResultChangedData } from "@/lib/market-data-refresh-event";
 import { marketToneBadgeClass, marketToneColor, marketToneTextClass, type MarketColorStyle } from "@/lib/market-color-style";
 import { readReturnToState } from "@/lib/navigation-state";
+import { publicDataRefreshStatus } from "@/lib/public-data-refresh-status";
 import type { AssetRecord, AssetType, Fund, Stock, TimePoint, Tone } from "@/lib/types";
 import { useMarketStore } from "@/stores/market-store";
 import { AllocationBars, LineChart } from "../../components/charts";
 import { normalizeMarket, type Market } from "../../components/types";
 import { SecondaryButton } from "../shared/calculation-workbench";
 import { LoadingRows, MetricStrip, PageHeader, Section, StatusBanner, ToneText } from "../shared/feature-shell";
-import { useApiResource } from "@/hooks/use-api-resource";
 
 type ChartRange = "1W" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "3Y" | "5Y" | "10Y" | "ALL";
 type ChartGranularity = "daily" | "weekly" | "monthly";
@@ -62,12 +63,11 @@ export function AssetDetailPage({
   const location = useLocation();
   const navigate = useNavigate();
   const [status, setStatus] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const [chartRange, setChartRange] = useState<ChartRange>("1Y");
   const [chartGranularity, setChartGranularity] = useState<ChartGranularity>("daily");
   const autoRefreshAttempts = useRef<Set<string>>(new Set());
   const marketColorStyle = useMarketStore((state) => state.marketColorStyle);
-  const calculation = useCalculationRun<AssetDetailResponse>(activeMarket);
-  const { run: runCalculation, running: calculationRunning } = calculation;
   const load = useCallback(
     (signal: AbortSignal) => apiGet<AssetDetailResponse>(`/api/assets/${assetId}`, {
       market: activeMarket,
@@ -75,12 +75,15 @@ export function AssetDetailPage({
     }, signal),
     [activeMarket, assetId, assetType],
   );
+  const assetDetailCacheKey = `asset-detail:${activeMarket}:${assetType ?? "all"}:${assetId}`;
   const resource = useApiResource(load, [load], {
-    cacheKey: `asset-detail:${activeMarket}:${assetType ?? "all"}:${assetId}`,
+    cacheKey: assetDetailCacheKey,
     keepPreviousData: true,
     staleTimeMs: 60_000,
   });
-  const detailData = calculation.result ?? resource.data;
+  const refreshDetailResource = resource.refresh;
+  const setDetailResourceData = resource.setData;
+  const detailData = resource.data;
   const asset = detailData?.asset;
   const refreshAssetId = asset?.id ?? assetId;
   const refreshAssetType = asset?.assetType ?? assetType ?? "stock";
@@ -113,29 +116,60 @@ export function AssetDetailPage({
     }
   }
 
-  const refreshPublicData = useCallback((range = chartRange) => {
+  const refreshPublicData = useCallback(async (range = chartRange, forceRefresh = false) => {
     setStatus(t(language, "asset.refreshing"));
-    void runCalculation({
-      workflow: "asset-detail",
-      assets: [{ assetId: refreshAssetId, assetType: refreshAssetType }],
-      params: { range },
-      refresh: true,
-    }).then((response) => {
-      if (response) setStatus(t(language, "asset.detailLoaded"));
-    });
-  }, [chartRange, language, refreshAssetId, refreshAssetType, runCalculation]);
+    setRefreshing(true);
+    try {
+      const response = await apiGet<AssetDetailResponse>(`/api/assets/${encodeURIComponent(refreshAssetId)}`, {
+        market: activeMarket,
+        type: refreshAssetType,
+        refresh: true,
+        range,
+        ...(forceRefresh ? { forceRefresh: true } : {}),
+      });
+      setDetailResourceData(response);
+      if (refreshResultChangedData(response.refreshResult)) {
+        dispatchMarketDataRefresh({
+          marketId: activeMarket,
+          assetIds: [response.asset.id],
+          assetTypes: [response.asset.assetType],
+          scopes: ["asset"],
+          source: response.refreshResult?.source,
+          result: response.refreshResult,
+        });
+      }
+      setStatus(publicDataRefreshStatus(response.refreshResult, language, "asset.detailLoaded"));
+    } catch (error) {
+      setStatus(apiErrorMessage(error));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [activeMarket, chartRange, language, refreshAssetId, refreshAssetType, setDetailResourceData]);
 
   useEffect(() => {
-    if (!asset || !historyAutoRefreshReason || calculationRunning) return;
+    function handleMarketDataRefresh(event: Event) {
+      const detail = marketDataRefreshDetail(event);
+      if (detail?.marketId !== activeMarket) return;
+      if (detail.assetIds?.length && !detail.assetIds.includes(refreshAssetId) && !detail.assetIds.includes(assetId)) return;
+      invalidateApiResourceCache(assetDetailCacheKey);
+      void refreshDetailResource("reload");
+    }
+
+    window.addEventListener(MARKET_DATA_REFRESH_EVENT, handleMarketDataRefresh);
+    return () => window.removeEventListener(MARKET_DATA_REFRESH_EVENT, handleMarketDataRefresh);
+  }, [activeMarket, assetDetailCacheKey, assetId, refreshAssetId, refreshDetailResource]);
+
+  useEffect(() => {
+    if (!asset || !historyAutoRefreshReason || refreshing) return;
     const attemptKey = `${asset.id}:${asset.assetType}:${chartRange}:${historyAutoRefreshReason}`;
     if (autoRefreshAttempts.current.has(attemptKey)) return;
     autoRefreshAttempts.current.add(attemptKey);
-    refreshPublicData(chartRange);
-  }, [asset, calculationRunning, chartRange, historyAutoRefreshReason, refreshPublicData]);
+    void refreshPublicData(chartRange);
+  }, [asset, chartRange, historyAutoRefreshReason, refreshing, refreshPublicData]);
 
   function handleChartRangeChange(range: ChartRange) {
     setChartRange(range);
-    refreshPublicData(range);
+    void refreshPublicData(range);
   }
 
   if (resource.loading && !asset) {
@@ -176,7 +210,7 @@ export function AssetDetailPage({
   const rangedHistory = filterHistoryByChartRange(sortedHistory, chartRange);
   const chartData = resampleHistory(rangedHistory, chartGranularity);
   const historyStats = summarizeHistory(rangedHistory);
-  const showingHistoryRefresh = calculationRunning && !chartData.length;
+  const showingHistoryRefresh = refreshing && !chartData.length;
   const chartTone = toneFromValue(historyStats?.returnPercent);
   const chartColor = marketToneColor(chartTone, marketColorStyle);
   const quoteStatus = quoteLabel(asset, language);
@@ -216,16 +250,15 @@ export function AssetDetailPage({
               <Star size={16} />
               {t(language, "discover.watch")}
             </button>
-            <RefreshIconButton onClick={() => refreshPublicData()} loading={calculationRunning} label={t(language, "common.refreshPublicData")} />
+            <RefreshIconButton onClick={() => void refreshPublicData(chartRange, true)} loading={refreshing} label={t(language, "common.refreshPublicData")} />
           </div>
         }
       />
-      {resource.error || calculation.error || status || calculation.warnings.length || asset.quoteStatus !== "fresh" ? (
+      {resource.error || status || asset.quoteStatus !== "fresh" ? (
         <Section>
           <StatusBanner
-            title={resource.error ?? calculation.error ?? (status || quoteStatus)}
-            body={calculation.warnings.map((warning) => warning.message).join(" ")}
-            tone={resource.error || calculation.error ? "negative" : "neutral"}
+            title={resource.error ?? (status || quoteStatus)}
+            tone={resource.error ? "negative" : "neutral"}
           />
         </Section>
       ) : null}
