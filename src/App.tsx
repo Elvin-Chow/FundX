@@ -1,7 +1,7 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "@/components/layout/app-shell";
-import { parseLanguage } from "@/lib/i18n";
+import { DEFAULT_LANGUAGE, parseLanguage } from "@/lib/i18n";
 import type { AssetType, MarketId } from "@/lib/types";
 import { parseMarket } from "@/lib/utils";
 import { useMarketStore } from "@/stores/market-store";
@@ -101,7 +101,7 @@ function parseIdList(searchParams: URLSearchParams) {
 
 function DefaultHomeRedirect() {
   const marketId = useMarketStore((state) => state.marketId);
-  return <Navigate to={`/home?market=${marketId}`} replace />;
+  return <Navigate to={`/home?market=${marketId}&lang=${DEFAULT_LANGUAGE}`} replace />;
 }
 
 export default function App() {

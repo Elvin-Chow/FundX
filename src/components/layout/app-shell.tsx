@@ -16,6 +16,7 @@ import { useEffect } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import fundxBrandLockupDark from "@/assets/brand/fundx-brand-lockup-dark.png";
 import fundxBrandLockupLight from "@/assets/brand/fundx-brand-lockup-light.png";
+import { BackendConnectionStatus } from "@/components/backend-connection-status";
 import { useMarketLatestRefresh } from "@/hooks/use-market-latest-refresh";
 import { MARKET_CONFIGS } from "@/lib/constants";
 import { DEFAULT_LANGUAGE, getMarketCopy, languageToHtmlLang, parseLanguage, t } from "@/lib/i18n";
@@ -46,24 +47,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const hasLanguageParam = searchParams.has("lang");
   const market = MARKET_CONFIGS[marketId];
   const { language, setLanguage, setMarket, syncThemeMode, themeMode } = useMarketStore();
-  const activeLanguage = hasLanguageParam ? urlLanguage : language;
+  const activeLanguage = hasLanguageParam ? urlLanguage : DEFAULT_LANGUAGE;
   const marketCopy = getMarketCopy(activeLanguage, marketId);
   useMarketLatestRefresh(marketId);
 
   useEffect(() => {
     setMarket(marketId);
-    if (hasLanguageParam) {
-      setLanguage(urlLanguage);
-      document.documentElement.lang = languageToHtmlLang(urlLanguage);
-    } else {
-      document.documentElement.lang = languageToHtmlLang(language);
-      if (language !== DEFAULT_LANGUAGE) {
-        const params = new URLSearchParams(searchParams.toString());
-        params.set("lang", language);
-        navigate(`${pathname}?${params.toString()}`, { replace: true });
-      }
+    const nextLanguage = hasLanguageParam ? urlLanguage : DEFAULT_LANGUAGE;
+    if (language !== nextLanguage) {
+      setLanguage(nextLanguage);
     }
-  }, [hasLanguageParam, language, marketId, navigate, pathname, searchParams, setLanguage, setMarket, urlLanguage]);
+    document.documentElement.lang = languageToHtmlLang(nextLanguage);
+  }, [hasLanguageParam, language, marketId, setLanguage, setMarket, urlLanguage]);
 
   useEffect(() => {
     syncThemeMode();
@@ -119,7 +114,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <p className="text-xs uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">{marketCopy.name}</p>
             <p className="text-sm font-medium text-ink dark:text-white">{marketCopy.style}</p>
           </div>
-          <div className="flex items-center gap-2" />
+          <div className="flex min-w-0 items-center gap-2">
+            <BackendConnectionStatus language={activeLanguage} />
+          </div>
         </div>
       </header>
 

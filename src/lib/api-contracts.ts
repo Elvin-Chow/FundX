@@ -48,6 +48,18 @@ export type ApiOk<T> = T & {
   updatedAt?: string;
 };
 
+export type BackendHealthResponse = {
+  ok: true;
+  service: string;
+  status: "healthy" | "degraded" | string;
+  database?: {
+    path?: string | null;
+    available?: boolean;
+    updatedAt?: string | null;
+    counts?: Record<string, number>;
+  };
+};
+
 export type AssetSearchType = "all" | "stock" | "fund";
 
 export type AssetSearchResponse = {
